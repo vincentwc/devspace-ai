@@ -71,6 +71,10 @@
 | DEC-019 | 生成接口统一 `multipart/form-data`；`text`/`file` 恰好二选一 |
 | DEC-020 | 上传默认上限 1 MiB（可配置）；超出明确 4xx |
 | DEC-021 | `tags` 类型为可选字符串列表 |
+| DEC-022 | 持久化使用 PostgreSQL 16（不再使用 SQLite）；SQLAlchemy 2.0 同步 + Alembic + psycopg3 |
+| DEC-023 | Run 存储：`generation_runs` 表，核心列 + `payload JSONB` |
+| DEC-024 | 调试页默认仅 local/test 开启；生产需 `ENABLE_DEBUG_UI=true` 才挂载 |
+| DEC-025 | 生产 Uvicorn 单 worker；CI/本地测试使用 Postgres service/compose |
 
 ## 3.1 方案取舍
 
@@ -137,7 +141,7 @@ devspace-ai/
 ├── infrastructure/
 │   ├── model/                  # OpenAI-compatible adapter
 │   ├── source/                 # Paste/Upload；预留外部需求源
-│   ├── persistence/            # Run/Trace（v1：SQLite）
+│   ├── persistence/            # Run/Trace（v1：PostgreSQL + SQLAlchemy/Alembic）
 │   └── prompt/                 # 模板加载与渲染
 └── tests/
 ```
@@ -267,7 +271,8 @@ v1 能力：
 5. 轨迹：`ingest → generate → validate` 的状态与摘要
 6. 历史：按 `run_id` 查看最近 Run（含失败/超时）
 
-非目标：登录、权限、多租户、编辑后回写业务库、独立 SPA。
+非目标：登录、权限、多租户、编辑后回写业务库、独立 SPA。  
+挂载条件：仅 `APP_ENV=local|test` 或 `ENABLE_DEBUG_UI=true` 时启用 `/debug/`；生产默认关闭。
 
 ## 8. 可观测性与配置
 
@@ -295,11 +300,22 @@ v1 能力：
 | `MODEL_API_KEY` | — | 密钥（环境变量，不入库） |
 | `MODEL_NAME` | — | 模型名 |
 | `MODEL_PROVIDER` | 无密钥时视为 `fake` | `openai_compatible` / `fake` |
+| `DATABASE_URL` | — | PostgreSQL 连接串（必填，非测试假值） |
+| `ENABLE_DEBUG_UI` | 随 `APP_ENV` | `local`/`test` 默认开；`prod` 默认关，显式 `true` 才挂载 `/debug/` |
 | 文本长度上限 | 50k 字符 | 超出拒绝 |
 | 上传大小上限 | 1 MiB | 超出拒绝 |
 | `max_cases` 默认 / 硬顶 | 10 / 30 | 请求未传时用默认；超硬顶拒绝 |
 | 模型调用超时 | 120s | 仅网络/模型等待 |
 | HTTP 总超时 | 150s | 含 ingest/validate/persist |
+
+### 8.3 持久化（PostgreSQL）
+
+- 引擎：PostgreSQL 16
+- 访问：SQLAlchemy 2.0（同步 Session）+ Alembic 迁移 + psycopg3
+- 表：`generation_runs`  
+  - 列：`run_id`（PK）、`status`、`created_at`、`input_text`、`payload`（JSONB：drafts/trace/issues/error 等）
+- 部署：v1 单实例应用 + 独立 Postgres；Uvicorn `workers=1`
+- 查看数据：`psql` / DBeaver / DataGrip 连接 `DATABASE_URL`
 
 ## 9. 与业务系统的衔接（非 v1 实现）
 
@@ -323,7 +339,7 @@ v1 能力：
 
 | 里程碑 | 交付 |
 | --- | --- |
-| M1 骨架 | DDD 分层、端口、配置、健康检查、Run 持久化 |
+| M1 骨架 | DDD 分层、端口、配置、健康检查、PostgreSQL/Alembic、Run 持久化 |
 | M2 生成闭环 | Fake/真实模型均可跑通 Graph；API 返回合法 `CaseDraft` |
 | M3 调试页 | 粘贴/上传 → 结果 + 轨迹 + 回放（**首个闭环验收点**） |
 | M4 硬化 | 限制项、错误码、测试与 README |
@@ -362,7 +378,8 @@ M3 完成后，另开迭代：
 
 ## 15. Ambiguity Report
 
-> grill-me Spec 模式审阅（阈值 0.2）；决议已写回 DEC-011～DEC-021 与 §3.1 / §5.5 / §5.6。
+> grill-me Spec 模式审阅（阈值 0.2）；决议已写回 DEC-011～DEC-025。  
+> 实现计划审阅追加：持久化由 SQLite 调整为 PostgreSQL（DEC-022～025）。
 
 ```
 Ambiguity Report:
@@ -374,5 +391,5 @@ Ambiguity Report:
   ──────────────────────────────
   Aggregate:    0.10  ✓ below threshold (0.2 spec)
 
-Push lightly on: prompt 质量无法机器强验收（属模型效果，不阻塞 v1）；Python 版本/依赖锁定留给 implementation plan。
+Push lightly on: prompt 质量无法机器强验收（属模型效果，不阻塞 v1）。
 ```

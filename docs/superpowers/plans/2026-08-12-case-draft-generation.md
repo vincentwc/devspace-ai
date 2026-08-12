@@ -4,7 +4,7 @@
 
 **目标：** 在 `devspace-ai` 落地 v1：通过 Jinja 调试页，将粘贴/上传的需求文本同步生成为通过校验的 `CaseDraft[]`，并展示 Run 轨迹；内部采用可演进的瘦 Agent Graph，模型支持 Fake / OpenAI 兼容协议。
 
-**架构：** 轻量 DDD + 六边形（Ports & Adapters）。应用层编排固定 Graph：`ingest → generate → validate → persist`。领域层拥有 `CaseDraft` / `GenerationRun` 不变量。基础设施提供 Fake/OpenAI 模型、multipart 摄入、SQLite Run 存储。接口层提供 REST + Jinja 调试页，共用同一应用用例。
+**架构：** 轻量 DDD + 六边形（Ports & Adapters）。应用层编排固定 Graph：`ingest → generate → validate → persist`。领域层拥有 `CaseDraft` / `GenerationRun` 不变量。基础设施提供 Fake/OpenAI 模型、multipart 摄入、**PostgreSQL（SQLAlchemy 2 + Alembic + psycopg3）** Run 存储。接口层提供 REST + 条件挂载的 Jinja 调试页，共用同一应用用例。
 
 **规格依据：** `docs/superpowers/specs/2026-08-12-devspace-ai-case-generation-design.md`
 
@@ -41,7 +41,7 @@
 | `interfaces` | HTTP DTO、路由、Jinja、错误映射 | 业务规则、直连 DB/模型 SDK 细节 |
 | `application` | 用例编排、事务/超时边界、端口调用 | FastAPI/SQL/httpx 细节 |
 | `domain` | 不变量、状态机、纯领域对象 | 框架、IO、提示词 |
-| `infrastructure` | 模型客户端、SQLite、文件解析、配置、日志 | 被 domain 反向依赖 |
+| `infrastructure` | 模型客户端、PostgreSQL/SQLAlchemy、文件解析、配置、日志 | 被 domain 反向依赖 |
 | `apps/api` | 组装根（DI）、进程入口 | 堆业务逻辑 |
 
 依赖方向：`interfaces → application → domain`；`infrastructure → application.port / domain`。
@@ -58,16 +58,30 @@
 | HTTP 客户端 | httpx | `0.28.1` | 模型调用 + TestClient |
 | 模板 | Jinja2 | `3.1.6` | 调试页 |
 | 上传 | python-multipart | `0.0.32` | multipart 解析 |
-| 持久化 | SQLite（stdlib） | 随 Python | v1 Run 存储；路径可配置 |
-| 测试 | pytest / pytest-asyncio | `9.1.1` / `1.4.0` | 默认 CI |
+| 持久化 | PostgreSQL | **16**（官方镜像 `postgres:16`） | 独立服务；应用单实例连接 |
+| ORM/迁移 | SQLAlchemy / Alembic | `2.0.51` / `1.19.1` | **同步** Session |
+| PG 驱动 | psycopg[binary] | `3.3.4` | psycopg3 |
+| 测试 | pytest / pytest-asyncio | `9.1.1` / `1.4.0` | 默认 CI（依赖 Postgres service） |
 | Lint | ruff | `0.16.2` | format + lint |
 | 类型检查 | mypy | `2.3.0`（`strict = true`） | 见 Task 1 配置 |
-| 容器 | Docker（python:3.12-slim） | 官方 slim | 多阶段构建 |
-| CI | GitHub Actions | `ubuntu-latest` + Python 3.12 | lint/type/test |
+| 容器 | Docker（python:3.12-slim）+ postgres:16 | 官方镜像 | compose 一键；应用 `workers=1` |
+| CI | GitHub Actions | `ubuntu-latest` + Python 3.12 + Postgres 16 service | lint/type/test |
 
 > **锁文件策略：** `pyproject.toml` 写精确主依赖版本；用 `uv lock` 生成 `uv.lock` 并提交仓库。应用/CI 一律 `uv sync --frozen`。
 
-> **不引入：** LangChain / LlamaIndex / 重型 Agent 框架；v1 不用 PostgreSQL、不用 Redis、不做鉴权网关。
+> **不引入：** LangChain / LlamaIndex / 重型 Agent 框架；v1 **不用 SQLite**、不用 Redis、不做鉴权网关、不上任务队列。
+
+### 1.2.1 计划审阅追加决议（grill-me）
+
+| ID | 决议 |
+| --- | --- |
+| PLAN-001 | 持久化直接上 PostgreSQL 16，不用 SQLite |
+| PLAN-002 | SQLAlchemy 2 同步 + Alembic + psycopg3 |
+| PLAN-003 | 调试页：`APP_ENV=local\|test` 默认开；`prod` 默认关，需 `ENABLE_DEBUG_UI=true` |
+| PLAN-004 | CI/本地测试用 compose 或 Actions `services: postgres`；测前迁移、测中清理 |
+| PLAN-005 | 生产 Uvicorn `workers=1` |
+| PLAN-006 | 表 `generation_runs`：核心列 + `payload JSONB` |
+| PLAN-007 | 设计规格已同步修订（DEC-022～025） |
 
 ### 1.3 推荐仓库布局
 
@@ -113,7 +127,8 @@ devspace-ai/
 | `HARD_MAX_CASES` | `30` | |
 | `MODEL_TIMEOUT_SECONDS` | `120` | |
 | `TOTAL_TIMEOUT_SECONDS` | `150` | |
-| `SQLITE_PATH` | `data/runs.db` | |
+| `DATABASE_URL` | `postgresql+psycopg://devspace:devspace@localhost:5432/devspace_ai` | 应用与 Alembic |
+| `ENABLE_DEBUG_UI` | 空（按环境推断） | `true`/`false`；prod 默认 false |
 | `HOST` / `PORT` | `0.0.0.0` / `8000` | |
 
 密钥不得入库；生产通过环境/密钥管理注入。
@@ -121,9 +136,11 @@ devspace-ai/
 ### 1.5 可观测与质量门禁
 
 - 日志：stdlib `logging` + JSON 格式（`run_id` 关联）；默认不打印完整提示词。
-- 健康检查：`GET /health`（存活）、`GET /ready`（可读写 SQLite）。
-- CI 门禁：`ruff check` + `ruff format --check` + `mypy` + `pytest`；无真实模型密钥必须全绿。
+- 健康检查：`GET /health`（存活）、`GET /ready`（可连接 PostgreSQL，必要时 `SELECT 1`）。
+- CI 门禁：`ruff check` + `ruff format --check` + `mypy` + `pytest`；无真实模型密钥必须全绿；Postgres 由 CI service 提供。
 - OpenAPI：由 FastAPI 自动生成，路径前缀 `/api/v1`。
+- 调试页：仅在允许环境下挂载 `/debug/`（见 PLAN-003）。
+- 看数：使用 `psql` / DBeaver / DataGrip 连接 `DATABASE_URL`，查询 `generation_runs`。
 
 ---
 
@@ -155,7 +172,7 @@ devspace-ai/
 | `src/devspace_ai/application/case_generation/*` | Graph 编排 |
 | `src/devspace_ai/application/port/*` | 入站/出站端口 |
 | `src/devspace_ai/infrastructure/model/*` | Fake / OpenAI 兼容 |
-| `src/devspace_ai/infrastructure/persistence/*` | SQLite |
+| `src/devspace_ai/infrastructure/persistence/*` | PostgreSQL / SQLAlchemy / Alembic |
 | `src/devspace_ai/infrastructure/source/*` | 文本/文件摄入 |
 | `src/devspace_ai/infrastructure/config/*` | Settings / 日志 |
 | `src/devspace_ai/interfaces/rest/*` | REST |
@@ -226,6 +243,9 @@ dependencies = [
   "pydantic==2.13.4",
   "pydantic-settings==2.15.0",
   "httpx==0.28.1",
+  "SQLAlchemy==2.0.51",
+  "alembic==1.19.1",
+  "psycopg[binary]==3.3.4",
 ]
 
 [project.optional-dependencies]
@@ -286,12 +306,14 @@ class Settings(BaseSettings):
     hard_max_cases: int = 30
     model_timeout_seconds: float = 120
     total_timeout_seconds: float = 150
-    sqlite_path: str = "data/runs.db"
+    database_url: str = "postgresql+psycopg://devspace:devspace@localhost:5432/devspace_ai"
+    enable_debug_ui: bool | None = None  # None=按 app_env 推断
 ```
 
-同步创建日志初始化、`create_app`（含 `/health` `/ready`）、`.env.example`、`docs/architecture.md`（可先摘抄本计划 §1）、`Makefile`、`Dockerfile`、`docker-compose.yml`、CI workflow。
+同步创建日志初始化、`create_app`（含 `/health` `/ready`，ready 对 PG `SELECT 1`）、`.env.example`、`docs/architecture.md`、`Makefile`、`Dockerfile`、`docker-compose.yml`（`api` + `db: postgres:16`）、CI workflow（`services: postgres:16`）、`alembic.ini` 与空迁移目录骨架。
 
-`Makefile` 最少目标：`sync` / `lint` / `typecheck` / `test` / `run` / `docker-up`。
+`Makefile` 最少目标：`sync` / `lint` / `typecheck` / `test` / `run` / `docker-up` / `db-migrate`。  
+本地测试前：`docker compose up -d db && make db-migrate`。
 
 ```bash
 uv lock
@@ -792,33 +814,60 @@ git commit -m "feat: add ModelPort and deterministic Fake Model"
 
 ---
 
-### Task 6: OpenAI 兼容适配器与 SQLite Run 仓储（含完整代码步骤）
+### Task 6: OpenAI 兼容适配器与 PostgreSQL Run 仓储（含完整代码步骤）
 
 **文件：**
-- 创建： `src/devspace_ai/infrastructure/model/openai_compatible.py`
-- 创建： `src/devspace_ai/application/port/outbound/run_repository_port.py`
-- 创建： `src/devspace_ai/infrastructure/persistence/sqlite_run_repository.py`
-- 创建： `tests/infrastructure/model/test_openai_compatible.py`
-- 创建： `tests/infrastructure/persistence/test_sqlite_run_repository.py`
+- 创建：`src/devspace_ai/infrastructure/model/openai_compatible.py`
+- 创建：`src/devspace_ai/application/port/outbound/run_repository_port.py`
+- 创建：`src/devspace_ai/infrastructure/persistence/models.py`（SQLAlchemy 表）
+- 创建：`src/devspace_ai/infrastructure/persistence/db.py`（Engine/Session factory）
+- 创建：`src/devspace_ai/infrastructure/persistence/pg_run_repository.py`
+- 创建：`alembic/` 初始迁移（`generation_runs`）
+- 创建：`tests/infrastructure/model/test_openai_compatible.py`
+- 创建：`tests/infrastructure/persistence/test_pg_run_repository.py`
 
 **接口：**
-- 消费： `Settings`, `GenerationRun`
+- 消费：`Settings`、`GenerationRun`、`DATABASE_URL`
 - 产出：
-  - `OpenAICompatibleModelAdapter` calling `POST {base}/chat/completions` with JSON schema-ish prompt; parse `drafts` array from message content
-  - `RunRepositoryPort.save(run)`, `get(run_id)`, `list_recent(limit=20)`
-  - SQLite JSON serialization of drafts/issues/trace
+  - `OpenAICompatibleModelAdapter`：`POST {base}/chat/completions`，解析 JSON `drafts`
+  - `RunRepositoryPort.save/get/list_recent`
+  - 表 `generation_runs(run_id PK, status, created_at, input_text, payload JSONB)`
 
-- [ ] **步骤 1： 编写失败的仓储测试**
+- [ ] **步骤 1：编写失败的仓储测试（依赖已启动的 Postgres 测试库）**
 
 ```python
-# tests/infrastructure/persistence/test_sqlite_run_repository.py
-from pathlib import Path
+# tests/infrastructure/persistence/test_pg_run_repository.py
+import os
+import pytest
+from sqlalchemy import create_engine, text
+from alembic import command
+from alembic.config import Config
 from devspace_ai.domain.run.models import GenerationRun, RunStatus, Issue
-from devspace_ai.infrastructure.persistence.sqlite_run_repository import SqliteRunRepository
+from devspace_ai.infrastructure.persistence.pg_run_repository import PgRunRepository
 
 
-def test_save_and_get(tmp_path: Path):
-    repo = SqliteRunRepository(tmp_path / "runs.db")
+@pytest.fixture()
+def db_url():
+    url = os.environ.get(
+        "DATABASE_URL",
+        "postgresql+psycopg://devspace:devspace@localhost:5432/devspace_ai_test",
+    )
+    return url
+
+
+@pytest.fixture()
+def repo(db_url):
+    engine = create_engine(db_url)
+    with engine.begin() as conn:
+        conn.execute(text("DROP TABLE IF EXISTS generation_runs CASCADE"))
+        conn.execute(text("DROP TABLE IF EXISTS alembic_version CASCADE"))
+    cfg = Config("alembic.ini")
+    cfg.set_main_option("sqlalchemy.url", db_url)
+    command.upgrade(cfg, "head")
+    return PgRunRepository(db_url)
+
+
+def test_save_and_get(repo):
     run = GenerationRun.start("req")
     run.finish(RunStatus.FAILED, [], [Issue(code="NO_VALID_DRAFTS", message="none")])
     repo.save(run)
@@ -828,195 +877,51 @@ def test_save_and_get(tmp_path: Path):
     assert loaded.issues[0].code == "NO_VALID_DRAFTS"
 ```
 
-- [ ] **步骤 2： 实现 SQLite 仓储**
+- [ ] **步骤 2：实现 SQLAlchemy 模型、Session、PgRunRepository、Alembic 迁移**
 
 ```python
-# src/devspace_ai/application/port/outbound/run_repository_port.py
-from typing import Protocol
-from devspace_ai.domain.run.models import GenerationRun
-
-
-class RunRepositoryPort(Protocol):
-    def save(self, run: GenerationRun) -> None: ...
-    def get(self, run_id: str) -> GenerationRun | None: ...
-    def list_recent(self, limit: int = 20) -> list[GenerationRun]: ...
-
-
-# src/devspace_ai/infrastructure/persistence/sqlite_run_repository.py
-import json
-import sqlite3
-from dataclasses import asdict
+# src/devspace_ai/infrastructure/persistence/models.py
 from datetime import datetime
-from pathlib import Path
-from devspace_ai.domain.case_draft.models import CaseDraft, TestStep
-from devspace_ai.domain.run.models import GenerationRun, Issue, RunStatus, RunTrace, StepRecord
+from sqlalchemy import DateTime, String, Text
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
-def _json_default(obj):
-    if isinstance(obj, datetime):
-        return obj.isoformat()
-    if hasattr(obj, "value"):
-        return obj.value
-    raise TypeError(type(obj))
+class Base(DeclarativeBase):
+    pass
 
 
-class SqliteRunRepository:
-    def __init__(self, path: str | Path):
-        self.path = Path(path)
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        with sqlite3.connect(self.path) as conn:
-            conn.execute(
-                "CREATE TABLE IF NOT EXISTS runs (run_id TEXT PRIMARY KEY, payload_json TEXT NOT NULL, created_at TEXT NOT NULL)"
-            )
+class GenerationRunRow(Base):
+    __tablename__ = "generation_runs"
 
-    def save(self, run: GenerationRun) -> None:
-        payload = json.dumps(asdict(run), ensure_ascii=False, default=_json_default)
-        with sqlite3.connect(self.path) as conn:
-            conn.execute(
-                "INSERT OR REPLACE INTO runs(run_id, payload_json, created_at) VALUES (?, ?, ?)",
-                (run.run_id, payload, run.created_at.isoformat()),
-            )
-
-    def get(self, run_id: str) -> GenerationRun | None:
-        with sqlite3.connect(self.path) as conn:
-            row = conn.execute("SELECT payload_json FROM runs WHERE run_id = ?", (run_id,)).fetchone()
-        return self._from_json(row[0]) if row else None
-
-    def list_recent(self, limit: int = 20) -> list[GenerationRun]:
-        with sqlite3.connect(self.path) as conn:
-            rows = conn.execute(
-                "SELECT payload_json FROM runs ORDER BY created_at DESC LIMIT ?",
-                (limit,),
-            ).fetchall()
-        return [self._from_json(r[0]) for r in rows]
-
-    def _from_json(self, payload: str) -> GenerationRun:
-        data = json.loads(payload)
-        drafts = [
-            CaseDraft(
-                title=d["title"],
-                preconditions=d.get("preconditions") or [],
-                steps=[TestStep(**s) for s in d.get("steps") or []],
-                priority=d.get("priority"),
-                tags=d.get("tags") or [],
-                rationale=d.get("rationale"),
-            )
-            for d in data.get("drafts") or []
-        ]
-        issues = [Issue(**i) for i in data.get("issues") or []]
-        steps = []
-        for s in (data.get("trace") or {}).get("steps") or []:
-            steps.append(
-                StepRecord(
-                    step_name=s["step_name"],
-                    status=s["status"],
-                    started_at=datetime.fromisoformat(s["started_at"]),
-                    ended_at=datetime.fromisoformat(s["ended_at"]) if s.get("ended_at") else None,
-                    summary=s.get("summary"),
-                    error=s.get("error"),
-                    prompt_tokens=s.get("prompt_tokens"),
-                    completion_tokens=s.get("completion_tokens"),
-                )
-            )
-        return GenerationRun(
-            run_id=data["run_id"],
-            status=RunStatus(data["status"]),
-            input_text=data["input_text"],
-            drafts=drafts,
-            issues=issues,
-            trace=RunTrace(steps=steps),
-            error=data.get("error"),
-            created_at=datetime.fromisoformat(data["created_at"]),
-        )
+    run_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    status: Mapped[str] = mapped_column(String(32), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    input_text: Mapped[str] = mapped_column(Text)
+    payload: Mapped[dict] = mapped_column(JSONB)
 ```
 
-- [ ] **步骤 3： 使用 httpx MockTransport 编写 OpenAI 适配器测试**
+`PgRunRepository`：把 `GenerationRun` 序列化为 `payload`（drafts/trace/issues/error），`save` 用 merge/upsert；`get`/`list_recent` 反序列化回领域对象。  
+Alembic 首迁：创建 `generation_runs`（含 JSONB）。
 
-```python
-# tests/infrastructure/model/test_openai_compatible.py
-import json
-import httpx
-import pytest
-from devspace_ai.infrastructure.config.settings import Settings
-from devspace_ai.infrastructure.model.openai_compatible import OpenAICompatibleModelAdapter
+- [ ] **步骤 3：编写并实现 OpenAI 兼容适配器测试（httpx MockTransport）**
 
+保持原计划中的 `OpenAICompatibleModelAdapter` 实现与测试不变（chat/completions + JSON `drafts`）。
 
-@pytest.mark.asyncio
-async def test_parses_drafts_from_chat_completion():
-    payload = {
-        "choices": [{"message": {"content": json.dumps({"drafts": [{"title": "t", "preconditions": [], "steps": [{"action": "a", "expected": "e", "test_data": None}], "priority": None, "tags": [], "rationale": None}]})}}],
-        "usage": {"prompt_tokens": 1, "completion_tokens": 2},
-        "model": "demo",
-    }
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        assert request.url.path.endswith("/chat/completions")
-        return httpx.Response(200, json=payload)
-
-    transport = httpx.MockTransport(handler)
-    settings = Settings(_env_file=None, model_base_url="https://example.com/v1", model_api_key="k", model_name="demo")
-    adapter = OpenAICompatibleModelAdapter(settings, transport=transport)
-    result = await adapter.generate_case_drafts("req", max_cases=10, language="zh-CN", domain_hint=None, repair_issues=None)
-    assert result.raw_drafts[0]["title"] == "t"
-    assert result.prompt_tokens == 1
-```
-
-```python
-# src/devspace_ai/infrastructure/model/openai_compatible.py
-import json
-import httpx
-from devspace_ai.application.port.outbound.model_port import ModelGenerationResult
-from devspace_ai.infrastructure.prompt.case_generation import build_messages
-
-
-class OpenAICompatibleModelAdapter:
-    def __init__(self, settings, transport=None):
-        self.settings = settings
-        self.transport = transport
-
-    async def generate_case_drafts(self, requirement_text, *, max_cases, language, domain_hint, repair_issues):
-        if not self.settings.model_base_url:
-            raise RuntimeError("MODEL_BASE_URL is required for openai_compatible provider")
-        messages = build_messages(
-            requirement_text,
-            max_cases=max_cases,
-            language=language,
-            domain_hint=domain_hint,
-            repair_issues=repair_issues,
-        )
-        url = self.settings.model_base_url.rstrip("/") + "/chat/completions"
-        headers = {"Authorization": f"Bearer {self.settings.model_api_key}", "Content-Type": "application/json"}
-        body = {
-            "model": self.settings.model_name,
-            "messages": messages,
-            "temperature": 0.2,
-            "response_format": {"type": "json_object"},
-        }
-        async with httpx.AsyncClient(timeout=self.settings.model_timeout_seconds, transport=self.transport) as client:
-            resp = await client.post(url, headers=headers, json=body)
-            resp.raise_for_status()
-            data = resp.json()
-        content = data["choices"][0]["message"]["content"]
-        parsed = json.loads(content)
-        drafts = parsed["drafts"] if isinstance(parsed, dict) and "drafts" in parsed else parsed
-        usage = data.get("usage") or {}
-        return ModelGenerationResult(
-            raw_drafts=list(drafts),
-            model=data.get("model") or self.settings.model_name,
-            prompt_tokens=usage.get("prompt_tokens"),
-            completion_tokens=usage.get("completion_tokens"),
-        )
-```
-
-- [ ] **步骤 4： 运行测试，预期通过**
-
-Run: `pytest tests/infrastructure/persistence/test_sqlite_run_repository.py tests/infrastructure/model/test_openai_compatible.py -v`
-
-- [ ] **步骤 5： 提交**
+- [ ] **步骤 4：运行测试，预期通过**
 
 ```bash
-git add src/devspace_ai/infrastructure/persistence src/devspace_ai/infrastructure/model/openai_compatible.py src/devspace_ai/application/port/outbound/run_repository_port.py tests/infrastructure
-git commit -m "feat: add OpenAI-compatible model adapter and SQLite run repository"
+docker compose up -d db
+# 准备测试库（可用同一实例不同 database）
+uv run pytest tests/infrastructure/persistence/test_pg_run_repository.py tests/infrastructure/model/test_openai_compatible.py -v
+```
+
+- [ ] **步骤 5：提交**
+
+```bash
+git add src/devspace_ai/infrastructure/persistence src/devspace_ai/infrastructure/model/openai_compatible.py \
+  src/devspace_ai/application/port/outbound/run_repository_port.py alembic alembic.ini tests/infrastructure
+git commit -m "feat: 新增 OpenAI 兼容模型与 PostgreSQL Run 仓储"
 ```
 
 ---
@@ -1310,7 +1215,7 @@ Tests:
 - [ ] **步骤 2： 实现路由并组装 `create_app`**
 
 In `create_app`:
-- build settings, model adapter, sqlite repo (use tmp path in tests via dependency override or constructor arg)
+- 组装 settings、model adapter、PgRunRepository（测试使用 `DATABASE_URL` 指向测试库）
 - mount router
 
 - [ ] **步骤 3： 运行，预期通过**
@@ -1413,43 +1318,45 @@ make test          # pytest -v
 
 | 规格要点 | 任务 |
 | --- | --- |
-| 生产工程/依赖锁定/CI/Docker | Task 1、10 |
+| 生产工程/依赖锁定/CI/Docker/PG | Task 1、6、10 |
 | 轻量 DDD 分层 | 全任务 |
 | CaseDraft + 可空 `test_data` | Task 2 |
 | Run 状态 / issues | Task 3、7 |
 | 粘贴上传 + 拒绝策略 | Task 4、8 |
 | Fake + OpenAI 兼容 | Task 5、6 |
+| PostgreSQL JSONB Run 仓储 + Alembic | Task 6 |
 | 同步 Graph + 一次纠错 | Task 7 |
 | REST multipart | Task 8 |
-| Jinja 调试页 | Task 9 |
+| Jinja 调试页（环境开关） | Task 9 |
 | 无密钥 CI 全绿 | Task 1、5、10 |
-| 不写 TMS / 无鉴权 / 无 SPA | 通过范围省略保证 |
+| 不写 TMS / 无鉴权 / 无 SPA / 无 SQLite | 通过范围省略保证 |
 
 ---
 
-## 5. 实现前审阅门禁（必须）
+## 5. Ambiguity Report（计划审阅）
 
-**是的：本计划需要先审阅通过，再启动编码。**
+> grill-me Spec 模式审阅实现计划（阈值 0.2）；决议已写回 PLAN-001～007，并同步设计规格 DEC-022～025。
 
-建议审阅清单：
+```
+Ambiguity Report:
+  Goals:        0.0   ✓ clear
+  Acceptance:   0.25  ✓ mostly clear
+  Boundaries:   0.0   ✓ clear
+  Alternatives: 0.0   ✓ clear
+  Assumptions:  0.25  ✓ mostly clear
+  ──────────────────────────────
+  Aggregate:    0.10  ✓ below threshold (0.2 spec)
 
-1. **技术基线**：Python 3.12 + uv + 上表锁定版本是否接受  
-2. **范围**：v1 仍是「调试页闭环」，不含 `cdp-suite` 入库  
-3. **任务切分**：10 个任务是否可按序交付、每任务可独立测试  
-4. **生产要素**：锁文件、CI、Docker、日志、健康检查是否够用（鉴权/多租户明确不做）
+Push lightly on: 本地必须能起 Postgres；prompt 质量仍非机器强验收项。
+```
 
-审阅方式任选：
-
-- 人工阅读本文并回复「计划通过」或修改点  
-- 对本文再跑一轮 `/grill-me`（推荐，阈值按 plan/spec 严格）
-
-**未通过审阅前，不启动 Subagent-Driven / Inline Execution。**
+**门禁结论：通过。** 你确认「计划通过」后，即可选择 Subagent-Driven 或 Inline Execution 开始编码。
 
 ---
 
 ## 6. 自检记录
 
-- 占位符扫描：无 TBD/TODO/「稍后实现」类步骤说明  
-- 类型一致性：`CaseDraft` / `GenerationRun` / `Issue` / `GenerateCaseDraftsCommand` 在各任务命名一致  
-- 依赖版本：主依赖已钉死；传递依赖以 `uv.lock` 为准  
-- mypy 版本：锁定 `mypy==2.3.0`；若 `uv lock` 与传递依赖冲突，以可解析版本回写本节版本表
+- 占位符扫描：无 TBD/TODO/「稍后实现」类阻塞步骤  
+- 持久化已从 SQLite 全面切换为 PostgreSQL  
+- 类型一致性：`CaseDraft` / `GenerationRun` / `Issue` / `GenerateCaseDraftsCommand` 命名一致  
+- 依赖版本：主依赖钉死（含 SQLAlchemy/Alembic/psycopg）；传递依赖以 `uv.lock` 为准  
