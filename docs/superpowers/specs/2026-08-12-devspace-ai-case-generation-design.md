@@ -1,0 +1,312 @@
+# devspace-ai：需求 → 用例草稿生成（瘦 Agent）设计
+
+> 状态：已确认设计稿  
+> 日期：2026-08-12  
+> 项目：`devspace-ai`  
+> 首个消费方（后续）：`cdp-suite`（`/Users/vincent/developEnv/code/cestc/cdp-suite`）  
+> 关联背景：测试管理系统 AI 能力通用化；首版完成可演示闭环，再扩展其他能力与业务系统
+
+## 1. 文档目的
+
+本文将「测试管理 + AI」的首个闭环固化为可实施设计：在独立项目 `devspace-ai` 中建设通用 AI 能力服务；v1 交付「需求文本 → 结构化用例草稿」，并采用可演进到 Agent 平台的瘦工作流形态。
+
+本文是后续 implementation plan 与开发验收的依据。
+
+## 2. 背景与目标
+
+### 2.1 背景
+
+- `cdp-suite` 已具备测试资产、测试环境等业务能力（轻量 DDD / Java），当前缺少 AI 能力。
+- 希望 AI 能力**不绑定**单一业务系统，后续可对接其他测试业务系统。
+- 因此新建 `devspace-ai` 作为通用 AI 服务，而不是把模型调用直接写进 `cdp-suite`。
+
+### 2.2 产品定位
+
+| 维度 | 决策 |
+| --- | --- |
+| 长期愿景 | Agent 工作流平台（多能力：生成、质检、归因、报告等） |
+| v1 形态 | 可演进的瘦 Agent：固定多步 Graph + Tool 端口 |
+| 首个能力 | 需求 → 用例草稿生成（创造资产） |
+| 成功标准 | 调试页内完成端到端演示闭环 |
+
+### 2.3 v1 目标
+
+1. 用户在调试页粘贴或上传需求文本，得到结构化 `CaseDraft[]`。
+2. 可查看 Graph 执行轨迹，并可按 `run_id` 回放。
+3. 对外 API 与领域模型与具体 TMS 无关，便于后续系统接入。
+4. 模型通过 OpenAI 兼容协议配置接入，不绑定单一厂商 SDK。
+
+### 2.4 v1 非目标
+
+- 不写入 `cdp-suite` 或其他 TMS（由业务系统在人工确认后自行入库）
+- 不生成「测试项 → 测试需求 → 用例」整树；只生成用例列表
+- 不解析 `docx/pdf`（可列为后续小步）
+- 不对接外部需求系统（预留 `RequirementSource` 端口）
+- 不做完整 Agent 操作系统（自治路由、多 Agent 注册中心、长期记忆）
+- 不做鉴权、多租户、正式业务前端
+- 不实现用例质量评审能力（下一 Capability 候选）
+
+## 3. 已确认决策
+
+| ID | 决策 |
+| --- | --- |
+| DEC-001 | 首版主路径：需求 → 用例草稿（创造资产）；质量评审后置 |
+| DEC-002 | 需求输入：v1 粘贴/上传；抽象 `RequirementSource`，预留外部需求系统 |
+| DEC-003 | AI 服务只返回草稿；业务系统负责预览确认与入库 |
+| DEC-004 | 生成物层级：仅用例列表，挂载到业务侧已选测试需求（业务侧后续集成时处理） |
+| DEC-005 | 首个可演示闭环落在 `devspace-ai` 调试页 |
+| DEC-006 | 技术栈：Python + FastAPI |
+| DEC-007 | 模型接入：OpenAI 兼容 `base_url + api_key + model` |
+| DEC-008 | 架构姿态：愿景=Agent 平台；v1=固定 Graph 瘦 Agent，预留 Tool/Capability 扩展 |
+| DEC-009 | 代码结构：轻量 DDD + 六边形（Ports & Adapters） |
+| DEC-010 | 测试步骤字段包含可空 `test_data` |
+
+## 4. 架构
+
+### 4.1 系统位置
+
+```text
+[调试页 / 未来业务系统]
+        │  HTTP (OpenAPI)
+        ▼
+   devspace-ai (FastAPI)
+        │
+        ├─ interfaces：REST + web_debug
+        ├─ application：用例编排（固定 Graph）
+        ├─ domain：Run / Requirement / CaseDraft / Capability
+        ├─ infrastructure：Model / Source / Persistence / Prompt
+        └─ Model Gateway（OpenAI-compatible）
+```
+
+`cdp-suite` 不在 v1 闭环内写库。v1 闭环在 `devspace-ai` 内完成：输入需求 → 跑工作流 → 调试页展示轨迹与草稿。
+
+### 4.2 为何采用轻量 DDD
+
+适合进入领域层的概念具备状态或不变量：
+
+- `GenerationRun` 生命周期与轨迹
+- `CaseDraft` / 步骤校验规则
+- `RequirementDocument` 规范化结果
+- Capability / Tool 边界
+
+提示词拼装、LLM HTTP、文件 IO、调试页属于 application / infrastructure，不为「每一次模型调用」强造重聚合。
+
+### 4.3 包结构
+
+```text
+devspace-ai/
+├── apps/
+│   └── api/                    # 启动入口、依赖组装
+├── interfaces/
+│   ├── rest/                   # FastAPI routes / HTTP DTO
+│   └── web_debug/              # 调试页（调用同一 application 用例）
+├── application/
+│   ├── case_generation/        # 用例生成应用服务
+│   ├── port/
+│   │   ├── inbound/            # GenerateCaseDraftsPort 等
+│   │   └── outbound/           # ModelPort / RequirementSourcePort / RunRepositoryPort
+│   └── dto/                    # 应用层命令与结果
+├── domain/
+│   ├── run/                    # GenerationRun、RunStatus、RunTrace、StepRecord
+│   ├── requirement/            # RequirementDocument、RequirementSourceType
+│   ├── case_draft/             # CaseDraft、TestStep、校验不变量
+│   └── capability/             # CapabilityId、固定工作流定义
+├── infrastructure/
+│   ├── model/                  # OpenAI-compatible adapter
+│   ├── source/                 # Paste/Upload；预留外部需求源
+│   ├── persistence/            # Run/Trace（v1：SQLite）
+│   └── prompt/                 # 模板加载与渲染
+└── tests/
+```
+
+依赖方向：
+
+```text
+interfaces → application → domain
+infrastructure → application.port / domain
+禁止：domain → infrastructure / interfaces
+```
+
+### 4.4 演进关系
+
+- v1：`application/case_generation` 编排固定 Graph：`ingest → generate → validate`。
+- 后续：新增 Capability（如 `case_review`）或将 Graph 升级为可配置 Agent，**不修改** `CaseDraft` 主契约与 `GenerateCaseDraftsPort` 语义。
+- 需求来源通过 `RequirementSourcePort`：v1 = paste/upload；日后 = 外部系统适配器。
+
+## 5. 领域模型与数据契约
+
+### 5.1 RequirementDocument
+
+| 字段 | 说明 |
+| --- | --- |
+| `source_type` | `paste` \| `upload` \|（预留）`external` |
+| `title` | 可选 |
+| `text` | 规范化后的纯文本 |
+| `metadata` | 文件名、字数等；不作为核心业务规则输入 |
+
+### 5.2 CaseDraft
+
+| 字段 | 约束 |
+| --- | --- |
+| `title` | 必填，非空 |
+| `preconditions` | 可选，字符串列表 |
+| `steps[]` | 至少 1 项 |
+| `priority` | 可选：`P0` \| `P1` \| `P2` \| `P3` |
+| `tags` | 可选 |
+| `rationale` | 可选，便于人工确认 |
+
+### 5.3 TestStep
+
+| 字段 | 约束 |
+| --- | --- |
+| `action` | 必填，非空 |
+| `expected` | 必填，非空 |
+| `test_data` | 可空；API 输出统一为 `null`（空字符串在进入领域时规范为 `null`） |
+
+生成提示要求：仅在需求中存在明确数据（账号、边界值、样例输入等）时填写 `test_data`；否则为 `null`，不强造。
+
+### 5.4 GenerationRun
+
+| 字段 | 说明 |
+| --- | --- |
+| `run_id` | 唯一标识 |
+| `status` | `queued` \| `running` \| `succeeded` \| `failed` \| `partial` |
+| `input` | 输入摘要/正文（受长度上限约束） |
+| `drafts` | 通过校验的 `CaseDraft[]` |
+| `trace.steps[]` | 每步名称、起止时间、摘要、token、错误 |
+| `error` | 失败时的错误信息 |
+
+### 5.5 对外 API
+
+#### `POST /api/v1/case-drafts/generate`
+
+- 入参：粘贴文本 **或** 上传文件（二选一）；可选 `options`：
+  - `language`（默认 `zh-CN`）
+  - `max_cases`（用例数量上限）
+  - `domain_hint`（可选补充说明）
+- 出参：`run_id`、`status`、`drafts`、`trace`
+
+#### `GET /api/v1/runs/{run_id}`
+
+- 回放结果与轨迹
+
+API 使用 OpenAPI 描述；HTTP DTO 与 domain 对象分离，映射发生在 `interfaces` 层。
+
+## 6. 主流程（固定瘦 Agent Graph）
+
+```text
+1. ingest_requirement
+   - paste/upload → RequirementDocument
+   - 抽文本、截断或拒绝超长输入，并在 trace 标明
+2. generate_cases
+   - ModelPort + 提示词 → 原始结构化输出
+   - 反序列化为 CaseDraft 候选
+3. validate_cases
+   - 领域校验
+   - 失败则带错误反馈再生成一次（最多 1 次）
+   - 仍失败 → status=`partial` 或 `failed`；返回已通过子集 + 问题列表
+4. persist_run
+   - 保存 Run + Trace，供调试页回放
+```
+
+应用层只负责编排；领域负责草稿合法性与 Run 状态迁移；基础设施负责 LLM、文件与存储。
+
+## 7. 调试页
+
+调试页属于 `interfaces/web_debug`，必须调用与对外相同的 application/API，禁止旁路实现。
+
+v1 能力：
+
+1. 输入：粘贴文本；上传 `txt` / `md`
+2. 选项：语言、用例数量上限、领域提示
+3. 触发生成：`POST /api/v1/case-drafts/generate`
+4. 结果：用例卡片（含 `test_data`）、一键复制 JSON
+5. 轨迹：`ingest → generate → validate` 的状态与摘要
+6. 历史：按 `run_id` 查看最近 Run
+
+非目标：登录、权限、多租户、编辑后回写业务库。
+
+## 8. 可观测性与配置
+
+### 8.1 Run 级观测
+
+| 维度 | 内容 |
+| --- | --- |
+| 业务轨迹 | `step_name/status/started_at/ended_at/summary/error` |
+| 模型用量 | `model`、`prompt_tokens`、`completion_tokens`（网关若返回） |
+| 质量信号 | 生成条数、校验失败条数、是否触发 validate 重试 |
+| 关联 ID | `run_id` 贯穿日志与 API |
+
+原则：
+
+- 应用层写 `RunTrace`；基础设施落库/打日志
+- 提示词全文默认不写普通日志（可配置 debug）；默认保留 hash/长度/摘要
+- 模型适配器：超时 + 有限重试（仅网络/5xx）
+- 业务校验重试：仅 validate 步，最多 1 次
+
+### 8.2 配置项
+
+| 配置 | 用途 |
+| --- | --- |
+| `MODEL_BASE_URL` | 兼容网关地址 |
+| `MODEL_API_KEY` | 密钥（环境变量，不入库） |
+| `MODEL_NAME` | 模型名 |
+| 文本长度上限 | 默认建议 50k 字符，可配置 |
+| 超时 / 用例数上限 / 上传大小 | 可配置 |
+
+## 9. 与业务系统的衔接（非 v1 实现）
+
+1. `devspace-ai` 始终返回 `CaseDraft[]`。
+2. 未来 `cdp-suite`（或其他 TMS）：用户选定测试需求 → 调用 AI → 预览 → 调用现有创建用例接口批量入库。
+3. 字段映射表留在业务系统防腐层，不进入 `devspace-ai` domain。
+
+## 10. 测试策略
+
+| 层级 | 内容 | 方式 |
+| --- | --- | --- |
+| domain | `CaseDraft` 不变量（含 `test_data` 可空）、Run 状态迁移 | 纯单元测试 |
+| application | Graph 编排、校验失败重试、partial 行为 | Mock outbound ports |
+| infrastructure | OpenAI 兼容请求形状、错误映射、txt/md 读取 | 契约测试 / fake server（可选） |
+| interfaces | 入参校验、DTO 映射、调试页关键路径 | APITestClient |
+| 冒烟 | 真实网关手工验证 | optional，不进默认 CI |
+
+默认 CI 在无真实模型密钥时必须全绿（使用 Fake Model）。
+
+## 11. 里程碑
+
+| 里程碑 | 交付 |
+| --- | --- |
+| M1 骨架 | DDD 分层、端口、配置、健康检查、Run 持久化 |
+| M2 生成闭环 | Fake/真实模型均可跑通 Graph；API 返回合法 `CaseDraft` |
+| M3 调试页 | 粘贴/上传 → 结果 + 轨迹 + 回放（**首个闭环验收点**） |
+| M4 硬化 | 限制项、错误码、测试与 README |
+
+M3 完成后，另开迭代：
+
+- `cdp-suite` 适配（预览确认入库），或
+- 下一个 Capability（如用例质检）
+
+## 12. 风险与对策
+
+| 风险 | 对策 |
+| --- | --- |
+| 模型输出不稳定/非 JSON | 强 schema 提示 + validate 一次纠错；失败返回 partial |
+| 需求文本过长 | 可配置截断/拒绝，并在 trace 标明 |
+| 过早做成重 Agent 平台 | 固定 Graph + Tool 端口；平台化进后续里程碑 |
+| 被单一 TMS 模型绑死 | 领域只认 `CaseDraft`；映射留在业务系统 |
+| 无网关无法演示 | Fake Model + 固定样例，保证本地与 CI |
+
+## 13. 验收标准
+
+1. 调试页完成「粘贴需求 → 可读用例草稿 → 轨迹回放」。
+2. 输出 JSON 字段稳定，具备 OpenAPI；步骤含可空 `test_data`。
+3. 无真实密钥时测试通过；配置网关后可切真实模型。
+4. 新增 Capability/Tool 时无需修改 v1 对外主契约语义。
+
+## 14. 开放扩展点（已选型，不阻塞 v1）
+
+- `RequirementSourcePort` 的 `external` 实现
+- `docx/pdf` 文本抽取
+- `case_review` Capability
+- Graph → 可配置多 Agent 编排
+- 业务系统侧批量入库适配器（`cdp-suite` 优先）
