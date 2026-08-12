@@ -1,5 +1,5 @@
 <component name="ProjectRunConfigurationManager">
-  <configuration default="false" name="devspace-ai Debug" type="PythonConfigurationType" factoryName="Python" nameIsGenerated="false">
+  <configuration default="true" name="devspace-ai Debug (Model)" type="PythonConfigurationType" factoryName="Python" nameIsGenerated="false">
     <module name="devspace-ai" />
     <option name="ENV_FILES" value="$PROJECT_DIR$/.env" />
     <option name="INTERPRETER_OPTIONS" value="" />
@@ -7,6 +7,7 @@
     <envs>
       <env name="PYTHONUNBUFFERED" value="1" />
       <env name="APP_ENV" value="local" />
+      <env name="MODEL_PROVIDER" value="openai_compatible" />
     </envs>
     <option name="SDK_HOME" value="$PROJECT_DIR$/.venv/bin/python" />
     <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$" />
@@ -14,7 +15,7 @@
     <option name="ADD_CONTENT_ROOTS" value="true" />
     <option name="ADD_SOURCE_ROOTS" value="true" />
     <option name="SCRIPT_NAME" value="$PROJECT_DIR$/scripts/debug_server.py" />
-    <option name="PARAMETERS" value="" />
+    <option name="PARAMETERS" value="--mode model" />
     <option name="SHOW_COMMAND_LINE" value="false" />
     <option name="EMULATE_TERMINAL" value="true" />
     <option name="MODULE_MODE" value="false" />

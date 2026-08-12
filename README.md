@@ -86,7 +86,8 @@ docker compose up -d --build
 | `make docker-up` | compose 构建并启动 api + db |
 | `make db-migrate` | Alembic upgrade head |
 
-PyCharm **Debug**（断点跟 DDD 调用链）：见 [docs/debug-pycharm.md](docs/debug-pycharm.md)；共享运行配置为 **devspace-ai Debug**（`scripts/debug_server.py`）。
+PyCharm **Debug**（断点跟 DDD 调用链）：见 [docs/debug-pycharm.md](docs/debug-pycharm.md)。  
+共享配置：**devspace-ai Debug (Model)**（优先，需 `.env` 中 `MODEL_*`）、**devspace-ai Debug (Fake)**（无密钥）。
 
 全量质量门禁（本地示例）：
 
