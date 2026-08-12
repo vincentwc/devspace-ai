@@ -1,115 +1,186 @@
-# Case Draft Generation Implementation Plan
+# 用例草稿生成（Case Draft Generation）实现计划
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **面向执行代理：** 必选子技能：使用 `superpowers:subagent-driven-development`（推荐）或 `superpowers:executing-plans`，按任务逐步实现。步骤使用 checkbox（`- [ ]`）跟踪。
 
-**Goal:** Build `devspace-ai` v1 so a Jinja debug page can synchronously turn pasted/uploaded requirement text into validated `CaseDraft[]` with run traces, using a thin Agent Graph and Fake/OpenAI-compatible models.
+**目标：** 在 `devspace-ai` 落地 v1：通过 Jinja 调试页，将粘贴/上传的需求文本同步生成为通过校验的 `CaseDraft[]`，并展示 Run 轨迹；内部采用可演进的瘦 Agent Graph，模型支持 Fake / OpenAI 兼容协议。
 
-**Architecture:** Lightweight DDD + ports/adapters in Python/FastAPI. Application layer runs fixed Graph `ingest → generate → validate → persist`. Domain owns `CaseDraft`/`GenerationRun` invariants. Infrastructure provides Fake/OpenAI model, multipart ingest, SQLite run store. Interfaces expose REST + Jinja debug UI on the same use case.
+**架构：** 轻量 DDD + 六边形（Ports & Adapters）。应用层编排固定 Graph：`ingest → generate → validate → persist`。领域层拥有 `CaseDraft` / `GenerationRun` 不变量。基础设施提供 Fake/OpenAI 模型、multipart 摄入、SQLite Run 存储。接口层提供 REST + Jinja 调试页，共用同一应用用例。
 
-**Tech Stack:** Python 3.11+, FastAPI, Uvicorn, Jinja2, Pydantic v2, httpx, SQLite (stdlib), pytest, pytest-asyncio, ruff (optional)
+**规格依据：** `docs/superpowers/specs/2026-08-12-devspace-ai-case-generation-design.md`
 
-**Spec:** `docs/superpowers/specs/2026-08-12-devspace-ai-case-generation-design.md`
-
-## Global Constraints
-
-- Python ≥ 3.11; package root `src/devspace_ai/` (DDD folders from spec live under this package).
-- Sync API only: `POST /api/v1/case-drafts/generate` blocks until Graph finishes or total timeout.
-- Public run status: `running | succeeded | failed | partial` (never expose `queued`).
-- Status rules (DEC-012): all valid → `succeeded`; ≥1 valid with issues → `partial`; 0 valid → `failed`.
-- Reject overlong text (default 50_000 chars) and oversized upload (default 1 MiB) with explicit 4xx `issues`.
-- `max_cases` default 10, hard max 30.
-- Timeouts: model 120s, HTTP/app total 150s; on timeout persist failed Run with `MODEL_TIMEOUT`.
-- `issues[]` shape: `{ code, message, draft_index?, field? }`.
-- No TMS write-back; no auth; no SPA; debug UI = Jinja + light JS.
-- Default CI green without real API key via deterministic Fake Model.
-- Dependencies: do not add LangChain/agent frameworks in v1.
-
-## File Map
-
-| Path | Responsibility |
-| --- | --- |
-| `pyproject.toml` | Project metadata, deps, pytest config |
-| `.env.example` | Documented env vars (no secrets) |
-| `README.md` | Run / configure / demo |
-| `src/devspace_ai/domain/case_draft/models.py` | `TestStep`, `CaseDraft`, domain validation |
-| `src/devspace_ai/domain/case_draft/errors.py` | Domain validation error type |
-| `src/devspace_ai/domain/requirement/models.py` | `RequirementDocument`, source enum |
-| `src/devspace_ai/domain/run/models.py` | `GenerationRun`, `RunStatus`, `RunTrace`, `StepRecord`, `Issue` |
-| `src/devspace_ai/domain/run/status.py` | Status resolution helpers |
-| `src/devspace_ai/application/port/outbound/model_port.py` | `ModelPort` protocol |
-| `src/devspace_ai/application/port/outbound/run_repository_port.py` | `RunRepositoryPort` |
-| `src/devspace_ai/application/port/inbound/generate_case_drafts_port.py` | Inbound port |
-| `src/devspace_ai/application/dto/commands.py` | `GenerateCaseDraftsCommand` |
-| `src/devspace_ai/application/dto/results.py` | `GenerateCaseDraftsResult` |
-| `src/devspace_ai/application/case_generation/service.py` | Graph orchestration |
-| `src/devspace_ai/application/case_generation/errors.py` | App-level input errors |
-| `src/devspace_ai/infrastructure/config/settings.py` | Env-backed settings |
-| `src/devspace_ai/infrastructure/model/fake_model.py` | Deterministic Fake Model |
-| `src/devspace_ai/infrastructure/model/openai_compatible.py` | OpenAI-compatible client |
-| `src/devspace_ai/infrastructure/model/factory.py` | Choose fake vs real |
-| `src/devspace_ai/infrastructure/persistence/sqlite_run_repository.py` | SQLite Run store |
-| `src/devspace_ai/infrastructure/prompt/case_generation.py` | Prompt templates |
-| `src/devspace_ai/infrastructure/source/text_ingest.py` | Text/file → requirement text |
-| `src/devspace_ai/interfaces/rest/schemas.py` | HTTP DTOs |
-| `src/devspace_ai/interfaces/rest/errors.py` | Error JSON helpers |
-| `src/devspace_ai/interfaces/rest/routes_case_drafts.py` | Generate + get run |
-| `src/devspace_ai/interfaces/web_debug/routes.py` | Debug pages |
-| `src/devspace_ai/interfaces/web_debug/templates/*.html` | Jinja templates |
-| `src/devspace_ai/apps/api/main.py` | App factory / DI wiring |
-| `tests/...` | Mirror package paths |
+**文档语言：** 本计划正文、任务说明、验收预期一律使用中文；代码标识符、API 路径、错误码保持英文（业界惯例）。
 
 ---
 
-### Task 1: Project scaffold + settings + health
+## 1. 技术架构基线（生产向）
 
-**Files:**
-- Create: `pyproject.toml`
-- Create: `.env.example`
-- Create: `src/devspace_ai/__init__.py`
-- Create: `src/devspace_ai/infrastructure/config/settings.py`
-- Create: `src/devspace_ai/apps/api/main.py`
-- Create: `tests/infrastructure/config/test_settings.py`
-- Create: `tests/apps/test_health.py`
+### 1.1 运行与分层
 
-**Interfaces:**
-- Consumes: nothing
-- Produces: `Settings` dataclass/pydantic settings; `create_app() -> FastAPI` with `GET /health`
-
-- [ ] **Step 1: Create `pyproject.toml`**
-
-```toml
-[project]
-name = "devspace-ai"
-version = "0.1.0"
-description = "Reusable AI service for test-domain capabilities"
-requires-python = ">=3.11"
-dependencies = [
-  "fastapi>=0.115.0",
-  "uvicorn[standard]>=0.30.0",
-  "jinja2>=3.1.0",
-  "python-multipart>=0.0.9",
-  "pydantic>=2.8.0",
-  "pydantic-settings>=2.4.0",
-  "httpx>=0.27.0",
-]
-
-[project.optional-dependencies]
-dev = ["pytest>=8.0.0", "pytest-asyncio>=0.23.0", "anyio>=4.0.0"]
-
-[build-system]
-requires = ["setuptools>=68"]
-build-backend = "setuptools.build_meta"
-
-[tool.setuptools.packages.find]
-where = ["src"]
-
-[tool.pytest.ini_options]
-pythonpath = ["src"]
-testpaths = ["tests"]
-asyncio_mode = "auto"
+```text
+                    ┌─────────────────────────────┐
+                    │  Jinja 调试页 / 外部 TMS     │
+                    └──────────────┬──────────────┘
+                                   │ HTTP / multipart
+                    ┌──────────────▼──────────────┐
+                    │ interfaces（REST + web_debug）│
+                    └──────────────┬──────────────┘
+                                   │
+                    ┌──────────────▼──────────────┐
+                    │ application（Graph 编排）     │
+                    │  ports: inbound / outbound   │
+                    └──────┬───────────────┬──────┘
+                           │               │
+              ┌────────────▼───┐     ┌─────▼────────────┐
+              │ domain         │     │ infrastructure   │
+              │ CaseDraft/Run  │     │ model/source/db  │
+              └────────────────┘     └──────────────────┘
 ```
 
-- [ ] **Step 2: Write failing settings test**
+| 层级 | 职责 | 禁止 |
+| --- | --- | --- |
+| `interfaces` | HTTP DTO、路由、Jinja、错误映射 | 业务规则、直连 DB/模型 SDK 细节 |
+| `application` | 用例编排、事务/超时边界、端口调用 | FastAPI/SQL/httpx 细节 |
+| `domain` | 不变量、状态机、纯领域对象 | 框架、IO、提示词 |
+| `infrastructure` | 模型客户端、SQLite、文件解析、配置、日志 | 被 domain 反向依赖 |
+| `apps/api` | 组装根（DI）、进程入口 | 堆业务逻辑 |
+
+依赖方向：`interfaces → application → domain`；`infrastructure → application.port / domain`。
+
+### 1.2 工程与工具链（锁定）
+
+| 类别 | 选型 | 版本（2026-08-12 锁定） | 说明 |
+| --- | --- | --- | --- |
+| 语言 | Python | **3.12.x**（`requires-python = ">=3.12,<3.14"`） | 生产常用 LTS 线；本地与 CI 一致 |
+| 包管理 | **uv** | `0.12.3` | 安装依赖 + 生成锁文件 |
+| Web | FastAPI | `0.141.1` | ASGI API |
+| 服务器 | uvicorn[standard] | `0.52.1` | 生产/本地均用 |
+| 校验/配置 | pydantic / pydantic-settings | `2.13.4` / `2.15.0` | Settings 与 DTO |
+| HTTP 客户端 | httpx | `0.28.1` | 模型调用 + TestClient |
+| 模板 | Jinja2 | `3.1.6` | 调试页 |
+| 上传 | python-multipart | `0.0.32` | multipart 解析 |
+| 持久化 | SQLite（stdlib） | 随 Python | v1 Run 存储；路径可配置 |
+| 测试 | pytest / pytest-asyncio | `9.1.1` / `1.4.0` | 默认 CI |
+| Lint | ruff | `0.16.2` | format + lint |
+| 类型检查 | mypy | `2.3.0`（`strict = true`） | 见 Task 1 配置 |
+| 容器 | Docker（python:3.12-slim） | 官方 slim | 多阶段构建 |
+| CI | GitHub Actions | `ubuntu-latest` + Python 3.12 | lint/type/test |
+
+> **锁文件策略：** `pyproject.toml` 写精确主依赖版本；用 `uv lock` 生成 `uv.lock` 并提交仓库。应用/CI 一律 `uv sync --frozen`。
+
+> **不引入：** LangChain / LlamaIndex / 重型 Agent 框架；v1 不用 PostgreSQL、不用 Redis、不做鉴权网关。
+
+### 1.3 推荐仓库布局
+
+```text
+devspace-ai/
+├── pyproject.toml
+├── uv.lock
+├── .python-version                 # 3.12
+├── .env.example
+├── .gitignore
+├── Dockerfile
+├── docker-compose.yml              # 本地一键
+├── Makefile                        # lint/test/run 快捷入口
+├── README.md
+├── docs/
+│   ├── architecture.md             # 架构说明（中文）
+│   └── superpowers/
+│       ├── specs/...
+│       └── plans/...
+├── .github/workflows/ci.yml
+├── src/devspace_ai/
+│   ├── apps/api/main.py
+│   ├── interfaces/{rest,web_debug}/
+│   ├── application/...
+│   ├── domain/...
+│   └── infrastructure/...
+└── tests/                          # 镜像 src 结构
+```
+
+### 1.4 运行时配置（环境变量）
+
+| 变量 | 默认 | 说明 |
+| --- | --- | --- |
+| `APP_ENV` | `local` | `local` / `test` / `prod` |
+| `LOG_LEVEL` | `INFO` | 结构化日志级别 |
+| `MODEL_BASE_URL` | 空 | OpenAI 兼容网关 |
+| `MODEL_API_KEY` | 空 | 密钥；空则 Fake |
+| `MODEL_NAME` | `gpt-4o-mini` | 模型名 |
+| `MODEL_PROVIDER` | 空（自动） | `openai_compatible` / `fake` |
+| `MAX_TEXT_CHARS` | `50000` | 超长拒绝 |
+| `MAX_UPLOAD_BYTES` | `1048576` | 超大拒绝 |
+| `DEFAULT_MAX_CASES` | `10` | |
+| `HARD_MAX_CASES` | `30` | |
+| `MODEL_TIMEOUT_SECONDS` | `120` | |
+| `TOTAL_TIMEOUT_SECONDS` | `150` | |
+| `SQLITE_PATH` | `data/runs.db` | |
+| `HOST` / `PORT` | `0.0.0.0` / `8000` | |
+
+密钥不得入库；生产通过环境/密钥管理注入。
+
+### 1.5 可观测与质量门禁
+
+- 日志：stdlib `logging` + JSON 格式（`run_id` 关联）；默认不打印完整提示词。
+- 健康检查：`GET /health`（存活）、`GET /ready`（可读写 SQLite）。
+- CI 门禁：`ruff check` + `ruff format --check` + `mypy` + `pytest`；无真实模型密钥必须全绿。
+- OpenAPI：由 FastAPI 自动生成，路径前缀 `/api/v1`。
+
+---
+
+## 2. 全局业务约束（摘自已确认规格）
+
+- 同步 API：`POST /api/v1/case-drafts/generate` 阻塞至 Graph 结束或总超时。
+- 对外状态：`running | succeeded | failed | partial`（不暴露 `queued`）。
+- 状态规则：全通过 → `succeeded`；≥1 可用且有问题 → `partial`；0 可用 → `failed`。
+- 超长文本 / 超大文件直接 4xx，错误信息含原因与上限。
+- `max_cases` 默认 10，硬顶 30。
+- 超时落库失败 Run，`issues` 含 `MODEL_TIMEOUT`。
+- `issues[] = { code, message, draft_index?, field? }`。
+- 不写 TMS；无鉴权；调试页 = Jinja + 少量 JS；禁止独立 SPA。
+- 无密钥时确定性 Fake Model。
+
+---
+
+## 3. 文件职责图
+
+| 路径 | 职责 |
+| --- | --- |
+| `pyproject.toml` / `uv.lock` | 依赖与工具配置 |
+| `docs/architecture.md` | 架构说明（中文） |
+| `Dockerfile` / `docker-compose.yml` / `Makefile` | 构建与本地交付 |
+| `.github/workflows/ci.yml` | CI |
+| `src/devspace_ai/domain/case_draft/*` | 用例草稿不变量 |
+| `src/devspace_ai/domain/run/*` | Run / 轨迹 / 状态 |
+| `src/devspace_ai/domain/requirement/*` | 需求文档模型 |
+| `src/devspace_ai/application/case_generation/*` | Graph 编排 |
+| `src/devspace_ai/application/port/*` | 入站/出站端口 |
+| `src/devspace_ai/infrastructure/model/*` | Fake / OpenAI 兼容 |
+| `src/devspace_ai/infrastructure/persistence/*` | SQLite |
+| `src/devspace_ai/infrastructure/source/*` | 文本/文件摄入 |
+| `src/devspace_ai/infrastructure/config/*` | Settings / 日志 |
+| `src/devspace_ai/interfaces/rest/*` | REST |
+| `src/devspace_ai/interfaces/web_debug/*` | 调试页 |
+| `src/devspace_ai/apps/api/main.py` | 应用工厂与组装 |
+| `tests/**` | 分层测试 |
+
+---
+
+### Task 1: 生产级工程脚手架（依赖锁定 / 配置 / 健康检查 / CI）
+
+**文件：**
+- 创建：`pyproject.toml`、`uv.lock`（由 uv 生成）、`.python-version`、`.env.example`
+- 创建：`Makefile`、`Dockerfile`、`docker-compose.yml`、`.github/workflows/ci.yml`
+- 创建：`docs/architecture.md`、`README.md`（初版）
+- 创建：`src/devspace_ai/infrastructure/config/settings.py`
+- 创建：`src/devspace_ai/infrastructure/config/logging.py`
+- 创建：`src/devspace_ai/apps/api/main.py`
+- 创建：`tests/infrastructure/config/test_settings.py`、`tests/apps/test_health.py`
+
+**接口：**
+- 消费：无
+- 产出：`Settings`；`create_app() -> FastAPI`；`GET /health`、`GET /ready`；可 `make test` / `make lint`
+
+- [ ] **步骤 1：编写失败的配置测试**
 
 ```python
 # tests/infrastructure/config/test_settings.py
@@ -126,12 +197,70 @@ def test_defaults():
     assert s.total_timeout_seconds == 150
 ```
 
-- [ ] **Step 3: Run test to verify it fails**
+- [ ] **步骤 2：运行测试确认失败**
 
-Run: `cd /Users/vincent/developEnv/code/ai/devspace-ai && python -m pip install -e ".[dev]" && pytest tests/infrastructure/config/test_settings.py -v`  
-Expected: FAIL (module missing)
+```bash
+cd /Users/vincent/developEnv/code/ai/devspace-ai
+# 若本机无 uv：curl -LsSf https://astral.sh/uv/install.sh | sh
+uv python pin 3.12
+# 先放最小 pyproject 后再 sync；此时应因模块不存在而失败
+uv run pytest tests/infrastructure/config/test_settings.py -v
+```
 
-- [ ] **Step 4: Implement settings + empty packages**
+预期：FAIL（模块不存在）
+
+- [ ] **步骤 3：落地 `pyproject.toml`（精确版本）与 Settings**
+
+```toml
+[project]
+name = "devspace-ai"
+version = "0.1.0"
+description = "通用测试域 AI 能力服务"
+readme = "README.md"
+requires-python = ">=3.12,<3.14"
+dependencies = [
+  "fastapi==0.141.1",
+  "uvicorn[standard]==0.52.1",
+  "jinja2==3.1.6",
+  "python-multipart==0.0.32",
+  "pydantic==2.13.4",
+  "pydantic-settings==2.15.0",
+  "httpx==0.28.1",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest==9.1.1",
+  "pytest-asyncio==1.4.0",
+  "ruff==0.16.2",
+  "mypy==2.3.0",
+]
+
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+packages = ["devspace_ai"]
+mypy_path = "src"
+```
 
 ```python
 # src/devspace_ai/infrastructure/config/settings.py
@@ -141,10 +270,15 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
+    app_env: str = "local"
+    log_level: str = "INFO"
+    host: str = "0.0.0.0"
+    port: int = 8000
+
     model_base_url: str | None = None
     model_api_key: str | None = None
     model_name: str = "gpt-4o-mini"
-    model_provider: str | None = None  # openai_compatible | fake | None(auto)
+    model_provider: str | None = None
 
     max_text_chars: int = 50_000
     max_upload_bytes: int = 1_048_576
@@ -155,27 +289,16 @@ class Settings(BaseSettings):
     sqlite_path: str = "data/runs.db"
 ```
 
-```python
-# src/devspace_ai/apps/api/main.py
-from fastapi import FastAPI
-from devspace_ai.infrastructure.config.settings import Settings
+同步创建日志初始化、`create_app`（含 `/health` `/ready`）、`.env.example`、`docs/architecture.md`（可先摘抄本计划 §1）、`Makefile`、`Dockerfile`、`docker-compose.yml`、CI workflow。
 
+`Makefile` 最少目标：`sync` / `lint` / `typecheck` / `test` / `run` / `docker-up`。
 
-def create_app(settings: Settings | None = None) -> FastAPI:
-    settings = settings or Settings()
-    app = FastAPI(title="devspace-ai", version="0.1.0")
-    app.state.settings = settings
-
-    @app.get("/health")
-    def health():
-        return {"status": "ok"}
-
-    return app
+```bash
+uv lock
+uv sync --all-extras --frozen
 ```
 
-Also create empty `__init__.py` files under `src/devspace_ai/` package tree as needed, and `.env.example` listing the settings field names.
-
-- [ ] **Step 5: Write health test and run all Task 1 tests**
+- [ ] **步骤 4：健康检查测试并通过 Task 1 全部测试**
 
 ```python
 # tests/apps/test_health.py
@@ -183,41 +306,42 @@ from fastapi.testclient import TestClient
 from devspace_ai.apps.api.main import create_app
 
 
-def test_health():
-    client = TestClient(create_app())
-    r = client.get("/health")
-    assert r.status_code == 200
-    assert r.json()["status"] == "ok"
+def test_health_and_ready(tmp_path):
+    app = create_app()
+    client = TestClient(app)
+    assert client.get("/health").json()["status"] == "ok"
+    assert client.get("/ready").status_code == 200
 ```
 
-Run: `pytest tests/infrastructure/config/test_settings.py tests/apps/test_health.py -v`  
-Expected: PASS
+```bash
+uv run pytest tests/infrastructure/config/test_settings.py tests/apps/test_health.py -v
+uv run ruff check src tests
+uv run mypy
+```
 
-- [ ] **Step 6: Commit**
+预期：全部通过（mypy 可随包逐步收紧，但 Task 1 至少 settings/main 无错误）。
+
+- [ ] **步骤 5：提交**
 
 ```bash
-git add pyproject.toml .env.example src/devspace_ai tests
-git commit -m "chore: scaffold FastAPI app, settings, and health endpoint"
+git add pyproject.toml uv.lock .python-version .env.example Makefile Dockerfile docker-compose.yml \
+  .github/workflows/ci.yml docs/architecture.md README.md src/devspace_ai tests
+git commit -m "chore: 初始化生产级工程脚手架与依赖锁定"
 ```
 
 ---
 
-### Task 2: Domain CaseDraft + TestStep invariants
+### Task 2: 领域模型 CaseDraft / TestStep
 
-**Files:**
-- Create: `src/devspace_ai/domain/case_draft/errors.py`
-- Create: `src/devspace_ai/domain/case_draft/models.py`
-- Create: `tests/domain/case_draft/test_models.py`
+**文件：**
+- 创建：`src/devspace_ai/domain/case_draft/errors.py`
+- 创建：`src/devspace_ai/domain/case_draft/models.py`
+- 创建：`tests/domain/case_draft/test_models.py`
 
-**Interfaces:**
-- Consumes: nothing
-- Produces:
-  - `TestStep(action: str, expected: str, test_data: str | None)`
-  - `CaseDraft(title, preconditions: list[str], steps: list[TestStep], priority: str | None, tags: list[str], rationale: str | None)`
-  - `CaseDraft.validate() -> None` raises `CaseDraftValidationError`
-  - `normalize_test_data(value: str | None) -> str | None` maps `""` → `None`
+**接口：**
+- 产出：`TestStep`、`CaseDraft`、`validate()`、`test_data` 空串规范为 `null`
 
-- [ ] **Step 1: Write failing tests**
+- [ ] **步骤 1：编写失败测试**
 
 ```python
 # tests/domain/case_draft/test_models.py
@@ -245,16 +369,21 @@ def test_empty_test_data_normalized_to_none():
 
 def test_rejects_empty_title_or_steps():
     with pytest.raises(CaseDraftValidationError):
-        CaseDraft(title=" ", preconditions=[], steps=[TestStep("a", "b", None)], priority=None, tags=[], rationale=None).validate()
+        CaseDraft(
+            title=" ",
+            preconditions=[],
+            steps=[TestStep("a", "b", None)],
+            priority=None,
+            tags=[],
+            rationale=None,
+        ).validate()
     with pytest.raises(CaseDraftValidationError):
         CaseDraft(title="t", preconditions=[], steps=[], priority=None, tags=[], rationale=None).validate()
 ```
 
-- [ ] **Step 2: Run tests — expect FAIL**
+- [ ] **步骤 2：运行确认失败** — `uv run pytest tests/domain/case_draft/test_models.py -v`
 
-Run: `pytest tests/domain/case_draft/test_models.py -v`
-
-- [ ] **Step 3: Implement domain models**
+- [ ] **步骤 3：实现领域模型**
 
 ```python
 # src/devspace_ai/domain/case_draft/errors.py
@@ -312,39 +441,24 @@ class CaseDraft:
         self.steps = normalized_steps
 ```
 
-- [ ] **Step 4: Run tests — expect PASS**
+- [ ] **步骤 4：运行确认通过** — `uv run pytest tests/domain/case_draft/test_models.py -v`
 
-Run: `pytest tests/domain/case_draft/test_models.py -v`
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add src/devspace_ai/domain/case_draft tests/domain/case_draft
-git commit -m "feat: add CaseDraft domain model and invariants"
-```
+- [ ] **步骤 5：提交** — `git commit -m "feat: 新增 CaseDraft 领域模型与不变量"`
 
 ---
 
-### Task 3: Domain GenerationRun, Issue, status rules
+### Task 3: GenerationRun、Issue 与状态判定
 
-**Files:**
-- Create: `src/devspace_ai/domain/run/models.py`
-- Create: `src/devspace_ai/domain/run/status.py`
-- Create: `tests/domain/run/test_status.py`
+**文件：**
+- 创建：`src/devspace_ai/domain/run/models.py`、`status.py`
+- 创建：`tests/domain/run/test_status.py`
 
-**Interfaces:**
-- Consumes: `CaseDraft`
-- Produces:
-  - `Issue(code: str, message: str, draft_index: int | None = None, field: str | None = None)`
-  - `StepRecord(...)`, `RunTrace(steps: list[StepRecord])`
-  - `RunStatus` enum: `RUNNING`, `SUCCEEDED`, `FAILED`, `PARTIAL`
-  - `resolve_status(valid_count: int, issue_count: int) -> RunStatus`
-  - `GenerationRun` dataclass with `mark_finished(status, drafts, issues)`
+**接口：**
+- 产出：`RunStatus`、`Issue`、`StepRecord`、`RunTrace`、`GenerationRun`、`resolve_status(valid_count, issue_count)`
 
-- [ ] **Step 1: Write failing tests**
+- [ ] **步骤 1：编写失败测试**
 
 ```python
-# tests/domain/run/test_status.py
 from devspace_ai.domain.run.status import resolve_status
 from devspace_ai.domain.run.models import RunStatus
 
@@ -356,76 +470,11 @@ def test_status_rules():
     assert resolve_status(valid_count=0, issue_count=0) == RunStatus.FAILED
 ```
 
-- [ ] **Step 2: Run — expect FAIL**
+- [ ] **步骤 2：运行确认失败**
 
-Run: `pytest tests/domain/run/test_status.py -v`
-
-- [ ] **Step 3: Implement**
+- [ ] **步骤 3：实现**
 
 ```python
-# src/devspace_ai/domain/run/models.py
-from __future__ import annotations
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from enum import Enum
-from uuid import uuid4
-from devspace_ai.domain.case_draft.models import CaseDraft
-
-
-class RunStatus(str, Enum):
-    RUNNING = "running"
-    SUCCEEDED = "succeeded"
-    FAILED = "failed"
-    PARTIAL = "partial"
-
-
-@dataclass
-class Issue:
-    code: str
-    message: str
-    draft_index: int | None = None
-    field: str | None = None
-
-
-@dataclass
-class StepRecord:
-    step_name: str
-    status: str
-    started_at: datetime
-    ended_at: datetime | None = None
-    summary: str | None = None
-    error: str | None = None
-    prompt_tokens: int | None = None
-    completion_tokens: int | None = None
-
-
-@dataclass
-class RunTrace:
-    steps: list[StepRecord] = field(default_factory=list)
-
-
-@dataclass
-class GenerationRun:
-    run_id: str
-    status: RunStatus
-    input_text: str
-    drafts: list[CaseDraft] = field(default_factory=list)
-    issues: list[Issue] = field(default_factory=list)
-    trace: RunTrace = field(default_factory=RunTrace)
-    error: str | None = None
-    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-
-    @staticmethod
-    def start(input_text: str) -> "GenerationRun":
-        return GenerationRun(run_id=str(uuid4()), status=RunStatus.RUNNING, input_text=input_text)
-
-    def finish(self, status: RunStatus, drafts: list[CaseDraft], issues: list[Issue]) -> None:
-        self.status = status
-        self.drafts = drafts
-        self.issues = issues
-        self.error = issues[0].message if issues and status in (RunStatus.FAILED, RunStatus.PARTIAL) else None
-
-
 # src/devspace_ai/domain/run/status.py
 from .models import RunStatus
 
@@ -438,36 +487,31 @@ def resolve_status(valid_count: int, issue_count: int) -> RunStatus:
     return RunStatus.SUCCEEDED
 ```
 
-- [ ] **Step 4: Run — expect PASS**
+`models.py` 需包含：`RunStatus(RUNNING/SUCCEEDED/FAILED/PARTIAL)`、`Issue`、`StepRecord`、`RunTrace`、`GenerationRun.start/finish`（`run_id` 用 UUID）。
 
-Run: `pytest tests/domain/run/test_status.py -v`
+- [ ] **步骤 4：运行确认通过**
 
-- [ ] **Step 5: Commit**
-
-```bash
-git add src/devspace_ai/domain/run tests/domain/run
-git commit -m "feat: add GenerationRun model and status resolution"
-```
+- [ ] **步骤 5：提交** — `git commit -m "feat: 新增 GenerationRun 与状态判定"`
 
 ---
 
-### Task 4: Ingest validation (text/file limits) + requirement model
+### Task 4: 需求摄入与输入拒绝（含完整代码步骤）
 
-**Files:**
-- Create: `src/devspace_ai/domain/requirement/models.py`
-- Create: `src/devspace_ai/application/case_generation/errors.py`
-- Create: `src/devspace_ai/infrastructure/source/text_ingest.py`
-- Create: `tests/infrastructure/source/test_text_ingest.py`
+**文件：**
+- 创建： `src/devspace_ai/domain/requirement/models.py`
+- 创建： `src/devspace_ai/application/case_generation/errors.py`
+- 创建： `src/devspace_ai/infrastructure/source/text_ingest.py`
+- 创建： `tests/infrastructure/source/test_text_ingest.py`
 
-**Interfaces:**
-- Consumes: `Settings` limits
-- Produces:
+**接口：**
+- 消费： `Settings` limits
+- 产出：
   - `RequirementDocument(source_type, title, text, metadata)`
   - `ingest_text(text, *, max_chars) -> RequirementDocument`
   - `ingest_upload(filename, raw_bytes, *, max_bytes, max_chars) -> RequirementDocument`
   - Raises `InputRejectedError(code, message)` for `INVALID_INPUT`, `INPUT_TOO_LONG`, `FILE_TOO_LARGE`, `UNSUPPORTED_FILE_TYPE`
 
-- [ ] **Step 1: Write failing tests**
+- [ ] **步骤 1： 编写失败测试**
 
 ```python
 # tests/infrastructure/source/test_text_ingest.py
@@ -504,11 +548,11 @@ def test_accept_md():
     assert doc.source_type == "upload"
 ```
 
-- [ ] **Step 2: Run — expect FAIL**
+- [ ] **步骤 2： 运行，预期失败**
 
 Run: `pytest tests/infrastructure/source/test_text_ingest.py -v`
 
-- [ ] **Step 3: Implement**
+- [ ] **步骤 3： Implement**
 
 ```python
 # src/devspace_ai/application/case_generation/errors.py
@@ -571,11 +615,11 @@ def ingest_upload(filename: str, raw: bytes, *, max_bytes: int, max_chars: int) 
     return doc
 ```
 
-- [ ] **Step 4: Run — expect PASS**
+- [ ] **步骤 4： 运行，预期通过**
 
 Run: `pytest tests/infrastructure/source/test_text_ingest.py -v`
 
-- [ ] **Step 5: Commit**
+- [ ] **步骤 5： 提交**
 
 ```bash
 git add src/devspace_ai/domain/requirement src/devspace_ai/application/case_generation/errors.py src/devspace_ai/infrastructure/source tests/infrastructure/source
@@ -584,24 +628,24 @@ git commit -m "feat: add requirement ingest with explicit rejection errors"
 
 ---
 
-### Task 5: Fake Model + ModelPort + prompt parsing
+### Task 5: ModelPort、确定性 Fake Model 与提示词（含完整代码步骤）
 
-**Files:**
-- Create: `src/devspace_ai/application/port/outbound/model_port.py`
-- Create: `src/devspace_ai/infrastructure/prompt/case_generation.py`
-- Create: `src/devspace_ai/infrastructure/model/fake_model.py`
-- Create: `src/devspace_ai/infrastructure/model/factory.py`
-- Create: `tests/infrastructure/model/test_fake_model.py`
+**文件：**
+- 创建： `src/devspace_ai/application/port/outbound/model_port.py`
+- 创建： `src/devspace_ai/infrastructure/prompt/case_generation.py`
+- 创建： `src/devspace_ai/infrastructure/model/fake_model.py`
+- 创建： `src/devspace_ai/infrastructure/model/factory.py`
+- 创建： `tests/infrastructure/model/test_fake_model.py`
 
-**Interfaces:**
-- Consumes: `RequirementDocument`, settings
-- Produces:
+**接口：**
+- 消费： `RequirementDocument`, settings
+- 产出：
   - `ModelPort.generate_case_drafts(requirement_text, *, max_cases, language, domain_hint, repair_issues: list[str] | None) -> ModelGenerationResult`
   - `ModelGenerationResult(raw_drafts: list[dict], prompt_tokens, completion_tokens, model)`
   - `FakeModelAdapter` deterministic 2–3 drafts; at least one `test_data=null` and one non-null
   - `build_model_adapter(settings) -> ModelPort` chooses fake when `model_provider==fake` or api key missing
 
-- [ ] **Step 1: Write failing tests**
+- [ ] **步骤 1： 编写失败测试**
 
 ```python
 # tests/infrastructure/model/test_fake_model.py
@@ -627,11 +671,11 @@ def test_factory_defaults_to_fake_without_key():
     assert isinstance(build_model_adapter(s), FakeModelAdapter)
 ```
 
-- [ ] **Step 2: Run — expect FAIL**
+- [ ] **步骤 2： 运行，预期失败**
 
 Run: `pytest tests/infrastructure/model/test_fake_model.py -v`
 
-- [ ] **Step 3: Implement port + fake + factory**
+- [ ] **步骤 3： 实现端口、Fake 与工厂**
 
 ```python
 # src/devspace_ai/application/port/outbound/model_port.py
@@ -735,11 +779,11 @@ def build_messages(requirement_text: str, *, max_cases: int, language: str, doma
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]
 ```
 
-- [ ] **Step 4: Run — expect PASS**
+- [ ] **步骤 4： 运行，预期通过**
 
 Run: `pytest tests/infrastructure/model/test_fake_model.py -v`
 
-- [ ] **Step 5: Commit**
+- [ ] **步骤 5： 提交**
 
 ```bash
 git add src/devspace_ai/application/port src/devspace_ai/infrastructure/model src/devspace_ai/infrastructure/prompt tests/infrastructure/model
@@ -748,23 +792,23 @@ git commit -m "feat: add ModelPort and deterministic Fake Model"
 
 ---
 
-### Task 6: OpenAI-compatible adapter + SQLite run repository
+### Task 6: OpenAI 兼容适配器与 SQLite Run 仓储（含完整代码步骤）
 
-**Files:**
-- Create: `src/devspace_ai/infrastructure/model/openai_compatible.py`
-- Create: `src/devspace_ai/application/port/outbound/run_repository_port.py`
-- Create: `src/devspace_ai/infrastructure/persistence/sqlite_run_repository.py`
-- Create: `tests/infrastructure/model/test_openai_compatible.py`
-- Create: `tests/infrastructure/persistence/test_sqlite_run_repository.py`
+**文件：**
+- 创建： `src/devspace_ai/infrastructure/model/openai_compatible.py`
+- 创建： `src/devspace_ai/application/port/outbound/run_repository_port.py`
+- 创建： `src/devspace_ai/infrastructure/persistence/sqlite_run_repository.py`
+- 创建： `tests/infrastructure/model/test_openai_compatible.py`
+- 创建： `tests/infrastructure/persistence/test_sqlite_run_repository.py`
 
-**Interfaces:**
-- Consumes: `Settings`, `GenerationRun`
-- Produces:
+**接口：**
+- 消费： `Settings`, `GenerationRun`
+- 产出：
   - `OpenAICompatibleModelAdapter` calling `POST {base}/chat/completions` with JSON schema-ish prompt; parse `drafts` array from message content
   - `RunRepositoryPort.save(run)`, `get(run_id)`, `list_recent(limit=20)`
   - SQLite JSON serialization of drafts/issues/trace
 
-- [ ] **Step 1: Write failing repository test**
+- [ ] **步骤 1： 编写失败的仓储测试**
 
 ```python
 # tests/infrastructure/persistence/test_sqlite_run_repository.py
@@ -784,7 +828,7 @@ def test_save_and_get(tmp_path: Path):
     assert loaded.issues[0].code == "NO_VALID_DRAFTS"
 ```
 
-- [ ] **Step 2: Implement SQLite repository**
+- [ ] **步骤 2： 实现 SQLite 仓储**
 
 ```python
 # src/devspace_ai/application/port/outbound/run_repository_port.py
@@ -886,7 +930,7 @@ class SqliteRunRepository:
         )
 ```
 
-- [ ] **Step 3: Write OpenAI adapter test with httpx MockTransport**
+- [ ] **步骤 3： 使用 httpx MockTransport 编写 OpenAI 适配器测试**
 
 ```python
 # tests/infrastructure/model/test_openai_compatible.py
@@ -964,11 +1008,11 @@ class OpenAICompatibleModelAdapter:
         )
 ```
 
-- [ ] **Step 4: Run tests — expect PASS**
+- [ ] **步骤 4： 运行测试，预期通过**
 
 Run: `pytest tests/infrastructure/persistence/test_sqlite_run_repository.py tests/infrastructure/model/test_openai_compatible.py -v`
 
-- [ ] **Step 5: Commit**
+- [ ] **步骤 5： 提交**
 
 ```bash
 git add src/devspace_ai/infrastructure/persistence src/devspace_ai/infrastructure/model/openai_compatible.py src/devspace_ai/application/port/outbound/run_repository_port.py tests/infrastructure
@@ -977,22 +1021,22 @@ git commit -m "feat: add OpenAI-compatible model adapter and SQLite run reposito
 
 ---
 
-### Task 7: Application Graph service (ingest → generate → validate → persist)
+### Task 7: 应用层 Graph 服务（含完整代码步骤）
 
-**Files:**
-- Create: `src/devspace_ai/application/dto/commands.py`
-- Create: `src/devspace_ai/application/dto/results.py`
-- Create: `src/devspace_ai/application/port/inbound/generate_case_drafts_port.py`
-- Create: `src/devspace_ai/application/case_generation/service.py`
-- Create: `tests/application/case_generation/test_service.py`
+**文件：**
+- 创建： `src/devspace_ai/application/dto/commands.py`
+- 创建： `src/devspace_ai/application/dto/results.py`
+- 创建： `src/devspace_ai/application/port/inbound/generate_case_drafts_port.py`
+- 创建： `src/devspace_ai/application/case_generation/service.py`
+- 创建： `tests/application/case_generation/test_service.py`
 
-**Interfaces:**
-- Consumes: `ModelPort`, `RunRepositoryPort`, `Settings`, ingest helpers, domain validators, `resolve_status`
-- Produces: `CaseGenerationService.generate(command: GenerateCaseDraftsCommand) -> GenerateCaseDraftsResult`
+**接口：**
+- 消费： `ModelPort`, `RunRepositoryPort`, `Settings`, ingest helpers, domain validators, `resolve_status`
+- 产出： `CaseGenerationService.generate(command: GenerateCaseDraftsCommand) -> GenerateCaseDraftsResult`
 - Command fields: `text: str | None`, `file_name: str | None`, `file_bytes: bytes | None`, `language`, `max_cases: int | None`, `domain_hint`
 - Exactly one of text/file; enforce hard max cases; one validation repair retry; map raw dicts → `CaseDraft`; persist always before return (including timeout/failure)
 
-- [ ] **Step 1: Write failing application tests with fake ports**
+- [ ] **步骤 1： 使用假端口编写失败的应用测试**
 
 ```python
 # tests/application/case_generation/test_service.py
@@ -1062,7 +1106,7 @@ async def test_model_timeout_persists_failed_run():
     assert repo.get(result.run_id) is not None
 ```
 
-- [ ] **Step 2: Implement DTOs + service**
+- [ ] **步骤 2： 实现 DTO 与服务**
 
 ```python
 # src/devspace_ai/application/dto/commands.py
@@ -1225,11 +1269,11 @@ class CaseGenerationService:
         return valid, issues
 ```
 
-- [ ] **Step 3: Run — expect PASS**
+- [ ] **步骤 3： 运行，预期通过**
 
 Run: `pytest tests/application/case_generation/test_service.py -v`
 
-- [ ] **Step 4: Commit**
+- [ ] **步骤 4： 提交**
 
 ```bash
 git add src/devspace_ai/application tests/application
@@ -1238,24 +1282,24 @@ git commit -m "feat: implement case generation graph service"
 
 ---
 
-### Task 8: REST API (multipart generate + get run)
+### Task 8: REST API（同步 multipart + 查询 Run）（含完整代码步骤）
 
-**Files:**
-- Create: `src/devspace_ai/interfaces/rest/schemas.py`
-- Create: `src/devspace_ai/interfaces/rest/errors.py`
-- Create: `src/devspace_ai/interfaces/rest/routes_case_drafts.py`
-- Modify: `src/devspace_ai/apps/api/main.py` (wire routes + DI)
-- Create: `tests/interfaces/rest/test_case_drafts_api.py`
+**文件：**
+- 创建： `src/devspace_ai/interfaces/rest/schemas.py`
+- 创建： `src/devspace_ai/interfaces/rest/errors.py`
+- 创建： `src/devspace_ai/interfaces/rest/routes_case_drafts.py`
+- 修改： `src/devspace_ai/apps/api/main.py` (wire routes + DI)
+- 创建： `tests/interfaces/rest/test_case_drafts_api.py`
 
-**Interfaces:**
-- Consumes: `CaseGenerationService`
-- Produces:
+**接口：**
+- 消费： `CaseGenerationService`
+- 产出：
   - `POST /api/v1/case-drafts/generate` multipart
   - `GET /api/v1/runs/{run_id}`
   - 400 body: `{"issues":[{"code","message",...}]}`
   - 200 body: run DTO with drafts/trace/issues/status
 
-- [ ] **Step 1: Write API tests with TestClient + Fake model wiring**
+- [ ] **步骤 1： 使用 TestClient + Fake 模型编写 API 测试**
 
 Tests:
 1. paste text → 200 succeeded/partial with drafts
@@ -1263,17 +1307,17 @@ Tests:
 3. too long text → 400 `INPUT_TOO_LONG` message contains limit
 4. get run by id after generate
 
-- [ ] **Step 2: Implement routes + wire `create_app`**
+- [ ] **步骤 2： 实现路由并组装 `create_app`**
 
 In `create_app`:
 - build settings, model adapter, sqlite repo (use tmp path in tests via dependency override or constructor arg)
 - mount router
 
-- [ ] **Step 3: Run — expect PASS**
+- [ ] **步骤 3： 运行，预期通过**
 
 Run: `pytest tests/interfaces/rest/test_case_drafts_api.py -v`
 
-- [ ] **Step 4: Commit**
+- [ ] **步骤 4： 提交**
 
 ```bash
 git add src/devspace_ai/interfaces/rest src/devspace_ai/apps/api/main.py tests/interfaces/rest
@@ -1282,24 +1326,24 @@ git commit -m "feat: expose synchronous case draft generation API"
 
 ---
 
-### Task 9: Jinja debug UI
+### Task 9: Jinja 调试页（含完整代码步骤）
 
-**Files:**
-- Create: `src/devspace_ai/interfaces/web_debug/routes.py`
-- Create: `src/devspace_ai/interfaces/web_debug/templates/base.html`
-- Create: `src/devspace_ai/interfaces/web_debug/templates/index.html`
-- Create: `src/devspace_ai/interfaces/web_debug/templates/run_detail.html`
-- Modify: `src/devspace_ai/apps/api/main.py` (mount debug routes + Jinja templates)
-- Create: `tests/interfaces/web_debug/test_debug_pages.py`
+**文件：**
+- 创建： `src/devspace_ai/interfaces/web_debug/routes.py`
+- 创建： `src/devspace_ai/interfaces/web_debug/templates/base.html`
+- 创建： `src/devspace_ai/interfaces/web_debug/templates/index.html`
+- 创建： `src/devspace_ai/interfaces/web_debug/templates/run_detail.html`
+- 修改： `src/devspace_ai/apps/api/main.py` (mount debug routes + Jinja templates)
+- 创建： `tests/interfaces/web_debug/test_debug_pages.py`
 
-**Interfaces:**
-- Consumes: same generate use case / REST internally (prefer calling application service from form POST, not duplicating logic)
-- Produces:
+**接口：**
+- 消费： same generate use case / REST internally (prefer calling application service from form POST, not duplicating logic)
+- 产出：
   - `GET /debug/` form page
   - `POST /debug/generate` → render results + trace + issues + JSON copy block
   - `GET /debug/runs/{run_id}` replay
 
-- [ ] **Step 1: Write failing page tests**
+- [ ] **步骤 1： 编写失败的页面测试**
 
 ```python
 def test_debug_get_form():
@@ -1316,15 +1360,15 @@ def test_debug_generate_paste():
     assert "ingest" in r.text or "轨迹" in r.text
 ```
 
-- [ ] **Step 2: Implement Jinja templates + routes**
+- [ ] **步骤 2： 实现 Jinja 模板与路由**
 
 Keep UI minimal: textarea, file input, max_cases, domain_hint, submit; results list steps including `test_data`; show issues; link to run detail.
 
-- [ ] **Step 3: Run — expect PASS**
+- [ ] **步骤 3： 运行，预期通过**
 
 Run: `pytest tests/interfaces/web_debug/test_debug_pages.py -v`
 
-- [ ] **Step 4: Commit**
+- [ ] **步骤 4： 提交**
 
 ```bash
 git add src/devspace_ai/interfaces/web_debug tests/interfaces/web_debug src/devspace_ai/apps/api/main.py
@@ -1333,63 +1377,79 @@ git commit -m "feat: add Jinja debug UI for case draft generation"
 
 ---
 
-### Task 10: README hardening + full test suite
 
-**Files:**
-- Create: `README.md`
-- Modify: `.env.example` if needed
-- Modify: any small gaps found while running full suite
+### Task 10: 文档硬化与全量质量门禁
 
-**Interfaces:**
-- Consumes: completed app
-- Produces: documented runbook
+**文件：**
+- 完善：`README.md`、`docs/architecture.md`、`.env.example`
+- 必要时微调 CI / Docker
 
-- [ ] **Step 1: Write README with exact commands**
-
-Include:
-- `python -m pip install -e ".[dev]"`
-- `uvicorn devspace_ai.apps.api.main:create_app --factory --reload`
-- open `http://127.0.0.1:8000/debug/`
-- configure `MODEL_BASE_URL` / `MODEL_API_KEY` / `MODEL_NAME`
-- note Fake Model default without key
-- link to design spec
-
-- [ ] **Step 2: Run full suite**
-
-Run: `pytest -v`  
-Expected: all PASS without real model key
-
-- [ ] **Step 3: Manual smoke (optional)**
-
-Start server, paste a short requirement on `/debug/`, confirm drafts + trace.
-
-- [ ] **Step 4: Commit**
+**验收命令（必须全绿）：**
 
 ```bash
-git add README.md .env.example
-git commit -m "docs: add README and finalize v1 runbook"
+uv sync --all-extras --frozen
+make lint          # ruff check + format --check
+make typecheck     # mypy
+make test          # pytest -v
 ```
+
+**README 必须包含（中文）：**
+1. 环境要求（Python 3.12、uv）
+2. 安装与启动：`make sync` / `make run`
+3. 调试页地址：`http://127.0.0.1:8000/debug/`
+4. 模型配置方法与 Fake 默认行为
+5. Docker 启动方式
+6. 链接到设计规格与架构文档
+
+- [ ] **步骤 1：** 补齐 README / architecture
+- [ ] **步骤 2：** 跑全量门禁
+- [ ] **步骤 3：**（可选）手工打开调试页粘贴需求验证
+- [ ] **步骤 4：** 提交 — `docs: 完善 README 与 v1 交付说明`
 
 ---
 
-## Spec Coverage Check
 
-| Spec item | Task |
+## 4. 规格覆盖对照
+
+| 规格要点 | 任务 |
 | --- | --- |
-| Light DDD package layout | 1–7 |
-| CaseDraft + nullable `test_data` | 2 |
-| Run status rules / issues | 3, 7 |
-| Paste/upload ingest + reject limits | 4, 8 |
-| Fake + OpenAI-compatible model | 5, 6 |
-| Sync Graph orchestration + repair once | 7 |
-| REST multipart + get run | 8 |
-| Jinja debug UI | 9 |
-| README / CI without key | 1, 5, 10 |
-| No TMS write / no auth / no SPA | honored by omission |
-| Alternatives/future capabilities | out of v1 scope (no tasks) |
+| 生产工程/依赖锁定/CI/Docker | Task 1、10 |
+| 轻量 DDD 分层 | 全任务 |
+| CaseDraft + 可空 `test_data` | Task 2 |
+| Run 状态 / issues | Task 3、7 |
+| 粘贴上传 + 拒绝策略 | Task 4、8 |
+| Fake + OpenAI 兼容 | Task 5、6 |
+| 同步 Graph + 一次纠错 | Task 7 |
+| REST multipart | Task 8 |
+| Jinja 调试页 | Task 9 |
+| 无密钥 CI 全绿 | Task 1、5、10 |
+| 不写 TMS / 无鉴权 / 无 SPA | 通过范围省略保证 |
 
-## Placeholder / Consistency Notes
+---
 
-- Package import root is `devspace_ai` under `src/` (packaging adaptation of spec folders).
-- Timeout: implement total timeout with `asyncio.wait_for` around model calls / generate loop; map `TimeoutError` → `MODEL_TIMEOUT`.
-- HTTP 4xx for input rejection happens before Run creation; runtime failures return HTTP 200 with failed/partial Run (per DEC-015/016 table).
+## 5. 实现前审阅门禁（必须）
+
+**是的：本计划需要先审阅通过，再启动编码。**
+
+建议审阅清单：
+
+1. **技术基线**：Python 3.12 + uv + 上表锁定版本是否接受  
+2. **范围**：v1 仍是「调试页闭环」，不含 `cdp-suite` 入库  
+3. **任务切分**：10 个任务是否可按序交付、每任务可独立测试  
+4. **生产要素**：锁文件、CI、Docker、日志、健康检查是否够用（鉴权/多租户明确不做）
+
+审阅方式任选：
+
+- 人工阅读本文并回复「计划通过」或修改点  
+- 对本文再跑一轮 `/grill-me`（推荐，阈值按 plan/spec 严格）
+
+**未通过审阅前，不启动 Subagent-Driven / Inline Execution。**
+
+---
+
+## 6. 自检记录
+
+- 占位符扫描：无 TBD/TODO/「稍后实现」类步骤说明  
+- 类型一致性：`CaseDraft` / `GenerationRun` / `Issue` / `GenerateCaseDraftsCommand` 在各任务命名一致  
+- 依赖版本：主依赖已钉死；传递依赖以 `uv.lock` 为准  
+- mypy 版本：锁定 `mypy==2.3.0`；若 `uv lock` 与传递依赖冲突，以可解析版本回写本节版本表
