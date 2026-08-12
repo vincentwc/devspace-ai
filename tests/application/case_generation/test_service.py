@@ -1,3 +1,4 @@
+import httpx
 import pytest
 
 from devspace_ai.application.case_generation.errors import InputRejectedError
@@ -174,6 +175,11 @@ class TimeoutModel:
         raise TimeoutError("model timed out")
 
 
+class HttpxTimeoutModel:
+    async def generate_case_drafts(self, *args: object, **kwargs: object) -> None:
+        raise httpx.TimeoutException("httpx timed out")
+
+
 class ConnectionErrorModel:
     async def generate_case_drafts(self, *args: object, **kwargs: object) -> None:
         raise ConnectionError("upstream unavailable")
@@ -185,6 +191,22 @@ async def test_model_timeout_persists_failed_run() -> None:
     svc = CaseGenerationService(
         settings=Settings(_env_file=None),
         model=TimeoutModel(),
+        runs=repo,
+    )
+    result = await svc.generate(
+        GenerateCaseDraftsCommand(text="用户登录", file_name=None, file_bytes=None)
+    )
+    assert result.status == RunStatus.FAILED
+    assert result.issues[0].code == "MODEL_TIMEOUT"
+    assert repo.get(result.run_id) is not None
+
+
+@pytest.mark.asyncio
+async def test_httpx_timeout_maps_to_model_timeout() -> None:
+    repo = InMemoryRunRepository()
+    svc = CaseGenerationService(
+        settings=Settings(_env_file=None),
+        model=HttpxTimeoutModel(),
         runs=repo,
     )
     result = await svc.generate(

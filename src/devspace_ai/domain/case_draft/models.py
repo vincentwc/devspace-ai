@@ -7,6 +7,8 @@ ALLOWED_PRIORITIES = {"P0", "P1", "P2", "P3"}
 
 @dataclass(frozen=True)
 class TestStep:
+    __test__ = False
+
     action: str
     expected: str
     test_data: str | None = None

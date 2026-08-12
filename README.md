@@ -66,7 +66,7 @@ docker compose up -d db   # 仅数据库
 docker compose up -d --build
 ```
 
-容器内 API 通过服务名 `db:5432` 连库；宿主机一律走 `localhost:55432`。
+镜像含 `alembic/` 与 `alembic.ini`；api 容器入口会先执行 `alembic upgrade head`，再以 **单 worker**（`--workers 1`）启动 Uvicorn。容器内 API 通过服务名 `db:5432` 连库；宿主机一律走 `localhost:55432`。
 
 ## 调试页开关（`ENABLE_DEBUG_UI`）
 

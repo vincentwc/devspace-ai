@@ -4,6 +4,8 @@ import asyncio
 from datetime import UTC, datetime
 from typing import Any, cast
 
+import httpx
+
 from devspace_ai.application.case_generation.errors import InputRejectedError
 from devspace_ai.application.dto.commands import GenerateCaseDraftsCommand
 from devspace_ai.application.dto.results import GenerateCaseDraftsResult
@@ -72,7 +74,7 @@ class CaseGenerationService:
             )
             status = resolve_status(len(drafts), len(issues))
             run.finish(status, drafts, issues)
-        except TimeoutError:
+        except (TimeoutError, httpx.TimeoutException):
             run.finish(
                 RunStatus.FAILED,
                 [],

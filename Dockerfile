@@ -11,11 +11,15 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
 COPY pyproject.toml uv.lock README.md ./
 COPY src ./src
+COPY alembic.ini ./
+COPY alembic ./alembic
+COPY scripts/docker-entrypoint.sh /docker-entrypoint.sh
 
-RUN uv sync --frozen --no-dev
+RUN uv sync --frozen --no-dev \
+    && chmod +x /docker-entrypoint.sh
 
 ENV PATH="/app/.venv/bin:$PATH"
 
 EXPOSE 8000
 
-CMD ["uvicorn", "devspace_ai.apps.api.main:create_uvicorn_app", "--factory", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+ENTRYPOINT ["/docker-entrypoint.sh"]
