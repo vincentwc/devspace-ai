@@ -39,7 +39,5 @@ def build_messages(
     else:
         user = requirement_text
     if repair_issues:
-        user += "\n\n请根据以下校验问题修正，并重新返回完整 JSON：\n- " + "\n- ".join(
-            repair_issues
-        )
+        user += "\n\n请根据以下校验问题修正，并重新返回完整 JSON：\n- " + "\n- ".join(repair_issues)
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]
