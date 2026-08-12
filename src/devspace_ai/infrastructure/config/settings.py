@@ -1,3 +1,6 @@
+from typing import Any
+
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -22,6 +25,19 @@ class Settings(BaseSettings):
     total_timeout_seconds: float = 150
     database_url: str = "postgresql+psycopg://devspace:devspace@localhost:55432/devspace_ai"
     enable_debug_ui: bool | None = None  # None=按 app_env 推断
+
+    @field_validator(
+        "model_base_url",
+        "model_api_key",
+        "model_provider",
+        "enable_debug_ui",
+        mode="before",
+    )
+    @classmethod
+    def empty_str_to_none(cls, value: Any) -> Any:
+        if value == "":
+            return None
+        return value
 
     def debug_ui_enabled(self) -> bool:
         if self.enable_debug_ui is not None:
