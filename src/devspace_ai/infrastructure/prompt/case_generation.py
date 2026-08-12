@@ -28,7 +28,10 @@ def build_messages(
         "Each step needs action, expected, test_data (null if no concrete data). "
         f"Schema: {json.dumps(SCHEMA_HINT, ensure_ascii=False)}"
     )
-    user = requirement_text if not domain_hint else f"{requirement_text}\n\nDomain hint:\n{domain_hint}"
+    if domain_hint:
+        user = f"{requirement_text}\n\nDomain hint:\n{domain_hint}"
+    else:
+        user = requirement_text
     if repair_issues:
         user += "\n\nFix these validation issues and return full JSON again:\n- " + "\n- ".join(
             repair_issues
