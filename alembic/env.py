@@ -20,7 +20,7 @@ def get_url() -> str:
     return os.getenv(
         "DATABASE_URL",
         config.get_main_option("sqlalchemy.url")
-        or "postgresql+psycopg://devspace:devspace@localhost:5432/devspace_ai",
+        or "postgresql+psycopg://devspace:devspace@localhost:55432/devspace_ai",
     )
 
 

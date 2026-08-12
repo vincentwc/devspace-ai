@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     hard_max_cases: int = 30
     model_timeout_seconds: float = 120
     total_timeout_seconds: float = 150
-    database_url: str = "postgresql+psycopg://devspace:devspace@localhost:5432/devspace_ai"
+    database_url: str = "postgresql+psycopg://devspace:devspace@localhost:55432/devspace_ai"
     enable_debug_ui: bool | None = None  # None=按 app_env 推断
 
     def debug_ui_enabled(self) -> bool:

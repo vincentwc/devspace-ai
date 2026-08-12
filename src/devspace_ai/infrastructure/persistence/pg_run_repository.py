@@ -102,8 +102,6 @@ class PgRunRepository:
     def list_recent(self, limit: int = 20) -> list[GenerationRun]:
         with self._session_factory() as session:
             rows = session.scalars(
-                select(GenerationRunRow)
-                .order_by(GenerationRunRow.created_at.desc())
-                .limit(limit)
+                select(GenerationRunRow).order_by(GenerationRunRow.created_at.desc()).limit(limit)
             ).all()
             return [_deserialize_run(row) for row in rows]

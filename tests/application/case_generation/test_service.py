@@ -96,9 +96,7 @@ async def test_max_cases_hard_limit() -> None:
     )
     with pytest.raises(InputRejectedError) as ei:
         await svc.generate(
-            GenerateCaseDraftsCommand(
-                text="x", file_name=None, file_bytes=None, max_cases=31
-            )
+            GenerateCaseDraftsCommand(text="x", file_name=None, file_bytes=None, max_cases=31)
         )
     assert ei.value.code == "MAX_CASES_EXCEEDED"
 
@@ -111,9 +109,7 @@ async def test_xor_input() -> None:
         runs=InMemoryRunRepository(),
     )
     with pytest.raises(InputRejectedError) as ei:
-        await svc.generate(
-            GenerateCaseDraftsCommand(text="x", file_name="a.txt", file_bytes=b"x")
-        )
+        await svc.generate(GenerateCaseDraftsCommand(text="x", file_name="a.txt", file_bytes=b"x"))
     assert ei.value.code == "INVALID_INPUT"
 
 
@@ -125,9 +121,7 @@ async def test_xor_zero_input() -> None:
         runs=InMemoryRunRepository(),
     )
     with pytest.raises(InputRejectedError) as ei:
-        await svc.generate(
-            GenerateCaseDraftsCommand(text=None, file_name=None, file_bytes=None)
-        )
+        await svc.generate(GenerateCaseDraftsCommand(text=None, file_name=None, file_bytes=None))
     assert ei.value.code == "INVALID_INPUT"
 
 

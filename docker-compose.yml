@@ -6,7 +6,8 @@ services:
       POSTGRES_PASSWORD: devspace
       POSTGRES_DB: devspace_ai
     ports:
-      - "5432:5432"
+      # 主机 55432 → 容器 5432，避免与本机已有 PostgreSQL(5432) 冲突
+      - "55432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U devspace -d devspace_ai"]
       interval: 5s

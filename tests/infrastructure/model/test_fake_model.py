@@ -7,7 +7,7 @@ from devspace_ai.infrastructure.model.fake_model import FakeModelAdapter
 
 def test_fake_returns_structured_drafts():
     adapter = FakeModelAdapter()
-    result = asyncio.get_event_loop().run_until_complete(
+    result = asyncio.run(
         adapter.generate_case_drafts(
             "登录需求",
             max_cases=10,
