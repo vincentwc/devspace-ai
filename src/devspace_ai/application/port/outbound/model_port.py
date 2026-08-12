@@ -4,7 +4,7 @@ from typing import Protocol
 
 @dataclass
 class ModelGenerationResult:
-    raw_drafts: list[dict]
+    raw_drafts: list[dict[str, object]]
     model: str
     prompt_tokens: int | None = None
     completion_tokens: int | None = None

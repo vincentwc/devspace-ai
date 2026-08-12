@@ -11,7 +11,7 @@ class FakeModelAdapter:
         domain_hint: str | None,
         repair_issues: list[str] | None,
     ) -> ModelGenerationResult:
-        drafts = [
+        drafts: list[dict[str, object]] = [
             {
                 "title": "主路径验证",
                 "preconditions": ["系统可用"],

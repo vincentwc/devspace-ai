@@ -21,7 +21,7 @@ def build_messages(
     language: str,
     domain_hint: str | None,
     repair_issues: list[str] | None,
-) -> list[dict]:
+) -> list[dict[str, object]]:
     system = (
         "You generate manual test case drafts as JSON only. "
         f"Language={language}. Return at most {max_cases} drafts. "
