@@ -94,6 +94,30 @@ uv sync --all-extras --frozen
 make lint && make typecheck && make test
 ```
 
+## 开发与 PR 流程
+
+**不要直接往 `main` 提交或推送。** 一律：开发分支 → 自测 → PR → 合入 `main`。
+
+```bash
+git checkout main && git pull origin main
+git checkout -b feat/your-change   # 也可用 fix/ docs/ chore/
+# …改代码…
+make lint && make typecheck && make test   # 有条件时跑全量门禁
+git push -u origin HEAD
+gh pr create --base main                   # 或在 GitHub 网页开 PR
+```
+
+| 前缀 | 用途 |
+| --- | --- |
+| `feat/` | 新功能 |
+| `fix/` | Bug 修复 |
+| `docs/` | 文档 / 注释 |
+| `chore/` | 工具链、流程、配置 |
+
+合入建议使用 **Squash merge**。Cursor Agent 也会遵循仓库规则 [`.cursor/rules/git-pr-workflow.mdc`](.cursor/rules/git-pr-workflow.mdc)。
+
+> 说明：当前仓库为 **Private**，GitHub Free 无法开启 `main` 的 Branch protection。若升级 GitHub Pro 或改为 Public，建议开启：禁止直推 `main`、必须经 PR、CI 通过后再合并。
+
 ## 文档
 
 - [架构说明](docs/architecture.md)
