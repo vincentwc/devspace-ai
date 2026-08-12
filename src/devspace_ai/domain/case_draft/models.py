@@ -38,9 +38,15 @@ class CaseDraft:
         for i, step in enumerate(self.steps):
             ns = step.normalized()
             if not ns.action:
-                raise CaseDraftValidationError("action must be non-empty", field=f"steps[{i}].action")
+                raise CaseDraftValidationError(
+                    "action must be non-empty",
+                    field=f"steps[{i}].action",
+                )
             if not ns.expected:
-                raise CaseDraftValidationError("expected must be non-empty", field=f"steps[{i}].expected")
+                raise CaseDraftValidationError(
+                    "expected must be non-empty",
+                    field=f"steps[{i}].expected",
+                )
             normalized_steps.append(ns)
         self.title = self.title.strip()
         self.steps = normalized_steps

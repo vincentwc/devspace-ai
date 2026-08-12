@@ -1,6 +1,7 @@
 import pytest
-from devspace_ai.domain.case_draft.models import CaseDraft, TestStep
+
 from devspace_ai.domain.case_draft.errors import CaseDraftValidationError
+from devspace_ai.domain.case_draft.models import CaseDraft, TestStep
 
 
 def test_valid_draft_allows_null_test_data():
@@ -31,4 +32,11 @@ def test_rejects_empty_title_or_steps():
             rationale=None,
         ).validate()
     with pytest.raises(CaseDraftValidationError):
-        CaseDraft(title="t", preconditions=[], steps=[], priority=None, tags=[], rationale=None).validate()
+        CaseDraft(
+            title="t",
+            preconditions=[],
+            steps=[],
+            priority=None,
+            tags=[],
+            rationale=None,
+        ).validate()

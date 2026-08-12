@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from devspace_ai.domain.case_draft.models import CaseDraft, TestStep
 from devspace_ai.domain.run.models import (
@@ -48,8 +48,8 @@ def test_generation_run_start_and_finish():
 
 
 def test_step_record_and_trace():
-    started = datetime(2026, 8, 12, 6, 0, tzinfo=timezone.utc)
-    ended = datetime(2026, 8, 12, 6, 1, tzinfo=timezone.utc)
+    started = datetime(2026, 8, 12, 6, 0, tzinfo=UTC)
+    ended = datetime(2026, 8, 12, 6, 1, tzinfo=UTC)
     step = StepRecord(
         step_name="generate_cases",
         status="succeeded",
