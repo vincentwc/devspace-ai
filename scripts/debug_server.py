@@ -1,13 +1,16 @@
 """IDE Debug 入口：单进程、无 reload，便于 PyCharm 断点。
 
-两种模式（优先真实模型）：
+重要：在终端执行本脚本只会「普通启动服务」，不会挂上调试器。
+要断点调试，请在 PyCharm 用 Debug（虫子）运行共享配置，而不是只跑 uv 命令。
+
+两种模型模式（与是否挂调试器无关）：
 
     uv run python scripts/debug_server.py --mode model   # 需 .env 配置 MODEL_*
     uv run python scripts/debug_server.py --mode fake    # 强制 Fake，无需密钥
 
 PyCharm 共享配置：
-- 「devspace-ai Debug (Model)」→ --mode model
-- 「devspace-ai Debug (Fake)」→ --mode fake
+- 「devspace-ai Debug (Model)」→ --mode model + IDE 调试器
+- 「devspace-ai Debug (Fake)」→ --mode fake + IDE 调试器
 """
 
 from __future__ import annotations
@@ -63,6 +66,13 @@ def main(argv: list[str] | None = None) -> None:
 
     host = os.getenv("HOST", "127.0.0.1")
     port = int(os.getenv("PORT", "8000"))
+    print(
+        "[debug] 服务即将启动（单进程、无 reload）。\n"
+        "  · 若你是在终端跑本命令：这只是普通启动，断点不会生效。\n"
+        "  · 要断点：PyCharm 选择「devspace-ai Debug (Model/Fake)」后点虫子图标 Debug。\n"
+        f"  · 启动后访问 http://{host if host != '0.0.0.0' else '127.0.0.1'}:{port}/debug/",
+        flush=True,
+    )
     uvicorn.run(
         "devspace_ai.apps.api.main:create_uvicorn_app",
         factory=True,

@@ -33,27 +33,34 @@ MODEL_PROVIDER=openai_compatible
 
 缺 `MODEL_API_KEY` 或 `MODEL_BASE_URL` 时，**Model** 配置会在启动阶段直接退出并提示改用 Fake。
 
-## PyCharm 一键 Debug
+## 常见误区：终端 `uv run` ≠ IDE Debug
+
+| 做法 | 实际效果 |
+| --- | --- |
+| 终端执行 `uv run python scripts/debug_server.py --mode model` | 只启动 HTTP 服务；`--mode` 只决定用真实模型还是 Fake |
+| PyCharm 点 **Debug（虫子）** 跑「devspace-ai Debug (Model)」 | 同一脚本 + **调试器附着**，断点才会停住 |
+
+终端里即使日志打印了 `[debug]`，也只是脚本前缀，**不是**已进入断点调试。
+
+## PyCharm 一键 Debug（要断点请用这个）
 
 1. **File → Open** 打开仓库根目录（含 `pyproject.toml`）。
 2. **Settings → Project → Python Interpreter** 选项目下 `.venv`（`make sync` 后应已存在）。
-3. **Run → Edit Configurations** 中选择：
-   - 有模型：`devspace-ai Debug (Model)`（已设为默认）
-   - 无模型：`devspace-ai Debug (Fake)`
-4. 在源码中下断点（见下表）→ 点击 **Debug**（虫子图标），不要用带 `--reload` 的方式启动。
-5. 浏览器打开 [http://127.0.0.1:8000/debug/](http://127.0.0.1:8000/debug/)，粘贴一段需求并提交。
+3. 右上角运行配置选 **devspace-ai Debug (Model)**（或 Fake）——不要只在 Terminal 里敲命令。
+4. 在源码中下断点（见下表）→ 点击绿色虫子 **Debug**（不是右侧普通 Run ▶）。
+5. 控制台出现 `Application startup complete` 后，浏览器打开 [http://127.0.0.1:8000/debug/](http://127.0.0.1:8000/debug/)，提交需求触发断点。
 
-命令行等价：
+若只想验证服务能起来（无断点），才用命令行：
 
 ```bash
-# 优先：真实模型（读 .env）
+# 普通启动 + 真实模型（读 .env）
 uv run python scripts/debug_server.py --mode model
 
-# 备选：Fake
+# 普通启动 + Fake
 uv run python scripts/debug_server.py --mode fake
 ```
 
-> **注意**：Debug 使用 `reload=False`、`workers=1`。`make run` 适合日常启动；跟断点请用上述配置。
+> **注意**：脚本使用 `reload=False`、`workers=1`，便于 IDE 断点。`make run` 适合日常启动。
 
 ## 分层一览（轻量 DDD）
 
