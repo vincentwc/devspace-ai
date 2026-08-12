@@ -17,8 +17,11 @@ dist/
 build/
 *.egg-info/
 
-# IDE / OS
-.idea/
+# IDE / OS（仅共享 Run Configuration；其余 .idea 本地忽略）
+.idea/*
+!.idea/runConfigurations/
+.idea/runConfigurations/*
+!.idea/runConfigurations/*.xml
 .vscode/
 .DS_Store
 

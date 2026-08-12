@@ -57,6 +57,7 @@ CI 使用 `postgres:16` service（宿主机 5432），注入 `DATABASE_URL`，�
 
 ## 相关文档
 
+- [PyCharm Debug 与调用链断点](debug-pycharm.md)
 - [设计规格](superpowers/specs/2026-08-12-devspace-ai-case-generation-design.md)
 - [实现计划](superpowers/plans/2026-08-12-case-draft-generation.md)
 - [仓库 README](../README.md)
