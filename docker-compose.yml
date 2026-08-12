@@ -1,0 +1,31 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: devspace
+      POSTGRES_PASSWORD: devspace
+      POSTGRES_DB: devspace_ai
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U devspace -d devspace_ai"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      APP_ENV: local
+      DATABASE_URL: postgresql+psycopg://devspace:devspace@db:5432/devspace_ai
+      ENABLE_DEBUG_UI: "true"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:

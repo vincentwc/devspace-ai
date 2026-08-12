@@ -1,0 +1,51 @@
+[project]
+name = "devspace-ai"
+version = "0.1.0"
+description = "通用测试域 AI 能力服务"
+readme = "README.md"
+requires-python = ">=3.12,<3.14"
+dependencies = [
+  "fastapi==0.141.1",
+  "uvicorn[standard]==0.52.1",
+  "jinja2==3.1.6",
+  "python-multipart==0.0.32",
+  "pydantic==2.13.4",
+  "pydantic-settings==2.15.0",
+  "httpx==0.28.1",
+  "SQLAlchemy==2.0.51",
+  "alembic==1.19.1",
+  "psycopg[binary]==3.3.4",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest==9.1.1",
+  "pytest-asyncio==1.4.0",
+  "ruff==0.16.2",
+  "mypy==2.3.0",
+]
+
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+packages = ["devspace_ai"]
+mypy_path = "src"
