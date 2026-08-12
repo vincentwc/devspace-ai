@@ -1,3 +1,5 @@
+"""入站端口：生成用例草稿用例接口（由 CaseGenerationService 实现）。"""
+
 from typing import Protocol
 
 from devspace_ai.application.dto.commands import GenerateCaseDraftsCommand

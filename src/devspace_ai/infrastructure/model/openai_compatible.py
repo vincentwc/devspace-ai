@@ -1,3 +1,8 @@
+"""OpenAI 兼容 Chat Completions 适配器（可对接官方或自建网关）。
+
+约定响应为 JSON object，优先读取 `drafts` 数组；否则把整个 JSON 当草稿列表。
+"""
+
 from __future__ import annotations
 
 import json
@@ -17,6 +22,7 @@ class OpenAICompatibleModelAdapter:
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self.settings = settings
+        # 测试可注入 MockTransport，避免真实网络
         self.transport = transport
 
     async def generate_case_drafts(
@@ -29,7 +35,7 @@ class OpenAICompatibleModelAdapter:
         repair_issues: list[str] | None,
     ) -> ModelGenerationResult:
         if not self.settings.model_base_url:
-            raise RuntimeError("MODEL_BASE_URL is required for openai_compatible provider")
+            raise RuntimeError("使用 openai_compatible 时必须配置 MODEL_BASE_URL")
         messages = build_messages(
             requirement_text,
             max_cases=max_cases,
@@ -46,6 +52,7 @@ class OpenAICompatibleModelAdapter:
             "model": self.settings.model_name,
             "messages": messages,
             "temperature": 0.2,
+            # 强制 JSON，降低后处理解析失败率
             "response_format": {"type": "json_object"},
         }
         async with httpx.AsyncClient(

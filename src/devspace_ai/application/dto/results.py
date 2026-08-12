@@ -1,3 +1,5 @@
+"""应用层出站结果：供 REST/Debug UI 映射为 DTO。"""
+
 from dataclasses import dataclass
 
 from devspace_ai.domain.case_draft.models import CaseDraft

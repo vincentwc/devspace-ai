@@ -1,3 +1,8 @@
+"""用例草稿 REST：multipart 表单生成 + 按 run_id 回查。
+
+POST 用 Form/File 是为了同时支持粘贴文本与文件上传（与调试页一致）。
+"""
+
 from __future__ import annotations
 
 from typing import Annotated, cast
@@ -46,5 +51,5 @@ async def generate_case_drafts(
 async def get_run(request: Request, run_id: str) -> GenerationRunDTO:
     run = _service(request).runs.get(run_id)
     if run is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="run not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="未找到该运行记录")
     return run_to_dto(run)

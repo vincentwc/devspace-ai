@@ -1,3 +1,8 @@
+"""SQLAlchemy ORM：generation_runs 表。
+
+payload(JSONB) 承载 drafts / issues / trace，便于 v1 快速演进字段而不改迁移。
+"""
+
 from datetime import datetime
 
 from sqlalchemy import DateTime, String, Text

@@ -1,3 +1,5 @@
+"""SQLAlchemy 引擎 / Session 工厂。"""
+
 from collections.abc import Generator
 from contextlib import contextmanager
 
@@ -10,6 +12,7 @@ def create_db_engine(database_url: str) -> Engine:
 
 
 def create_session_factory(engine: Engine) -> sessionmaker[Session]:
+    # expire_on_commit=False：commit 后仍可读属性，适合把 ORM 行映射到领域对象
     return sessionmaker(bind=engine, expire_on_commit=False)
 
 

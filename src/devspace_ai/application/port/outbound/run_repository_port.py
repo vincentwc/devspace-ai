@@ -1,3 +1,5 @@
+"""出站端口：GenerationRun 持久化与回查。"""
+
 from typing import Protocol
 
 from devspace_ai.domain.run.models import GenerationRun

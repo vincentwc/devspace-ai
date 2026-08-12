@@ -1,3 +1,12 @@
+"""FastAPI 组装入口：接线 Settings / Model / Repository / REST / Debug UI。
+
+分层约定：
+- interfaces：HTTP 适配
+- application：用例编排
+- domain：纯领域模型
+- infrastructure：模型、Postgres、配置等适配器
+"""
+
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -23,6 +32,7 @@ def create_app(
     engine_factory: Callable[[str], Engine] | None = None,
     case_generation_service: CaseGenerationService | None = None,
 ) -> FastAPI:
+    """创建应用。测试可注入 `case_generation_service` / `engine_factory` 以避免真实外依赖。"""
     settings = settings or Settings()
     configure_logging(settings.log_level)
 
@@ -37,6 +47,7 @@ def create_app(
 
     app.add_exception_handler(InputRejectedError, input_rejected_handler)
     app.include_router(case_drafts_router)
+    # Debug UI：local/test 默认开；生产需显式 ENABLE_DEBUG_UI=true
     if settings.debug_ui_enabled():
         app.include_router(debug_router)
 
@@ -44,10 +55,12 @@ def create_app(
 
     @app.get("/health")
     def health() -> dict[str, str]:
+        """存活探针：进程起来即 ok，不查库。"""
         return {"status": "ok"}
 
     @app.get("/ready")
     def ready(response: Response) -> dict[str, str]:
+        """就绪探针：能连上 Postgres 才 ready。"""
         engine: Engine | None = None
         try:
             engine = make_engine(settings.database_url)
@@ -65,4 +78,5 @@ def create_app(
 
 
 def create_uvicorn_app() -> FastAPI:
+    """Uvicorn / Docker 入口用的无参工厂。"""
     return create_app()

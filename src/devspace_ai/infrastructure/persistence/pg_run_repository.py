@@ -1,3 +1,9 @@
+"""GenerationRun 的 Postgres 仓储实现。
+
+表结构刻意「瘦」：常用列（run_id/status/created_at/input_text）+ payload JSONB。
+草稿、issues、trace 放进 payload，避免早期过度拆表。
+"""
+
 from __future__ import annotations
 
 from dataclasses import asdict
@@ -19,6 +25,7 @@ from devspace_ai.infrastructure.persistence.models import GenerationRunRow
 
 
 def _serialize_payload(run: GenerationRun) -> dict[str, object]:
+    """领域对象 → JSONB；datetime 转 ISO 字符串。"""
     steps: list[dict[str, object]] = []
     for s in run.trace.steps:
         item = asdict(s)
@@ -34,6 +41,7 @@ def _serialize_payload(run: GenerationRun) -> dict[str, object]:
 
 
 def _deserialize_run(row: GenerationRunRow) -> GenerationRun:
+    """行记录 → 领域 GenerationRun。"""
     payload: dict[str, Any] = dict(row.payload or {})
     drafts = [
         CaseDraft(
@@ -78,6 +86,7 @@ class PgRunRepository:
         self._session_factory = create_session_factory(self._engine)
 
     def save(self, run: GenerationRun) -> None:
+        # merge：同 run_id 重复保存时更新 payload/status，保留首次 created_at
         payload = _serialize_payload(run)
         with self._session_factory() as session:
             existing = session.get(GenerationRunRow, run.run_id)

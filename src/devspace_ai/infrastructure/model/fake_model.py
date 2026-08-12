@@ -1,3 +1,8 @@
+"""确定性假模型：本地开发与 CI 不依赖真实 LLM。
+
+输出形状与正式适配器一致，便于打通 Graph / 校验 / 持久化整条链路。
+"""
+
 from devspace_ai.application.port.outbound.model_port import ModelGenerationResult
 
 

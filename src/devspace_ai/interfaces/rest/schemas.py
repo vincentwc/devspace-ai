@@ -1,3 +1,5 @@
+"""REST 响应 DTO：领域对象 ↔ JSON 边界，extra=forbid 防止悄悄泄漏内部字段。"""
+
 from __future__ import annotations
 
 from datetime import datetime

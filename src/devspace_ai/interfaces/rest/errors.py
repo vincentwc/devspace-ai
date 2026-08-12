@@ -1,3 +1,5 @@
+"""将 InputRejectedError 统一成 `{issues:[{code,message}]}` 形态。"""
+
 from __future__ import annotations
 
 from fastapi import Request

@@ -1,3 +1,8 @@
+"""Jinja 调试页：本地快速试生成，不替代正式 REST 集成。
+
+路由挂在 /debug，是否启用由 Settings.debug_ui_enabled() 决定。
+"""
+
 from __future__ import annotations
 
 import json
@@ -24,6 +29,7 @@ def _service(request: Request) -> CaseGenerationService:
 
 
 def _run_context(dto: GenerationRunDTO) -> dict[str, Any]:
+    """模板既渲染结构化字段，也给一份完整 JSON 便于复制。"""
     payload = dto.model_dump(mode="json")
     return {
         "run": dto,
@@ -66,6 +72,7 @@ async def debug_generate(
     try:
         result = await _service(request).generate(command)
     except InputRejectedError as exc:
+        # 输入类错误回表单页展示，不跳详情
         return templates.TemplateResponse(
             request,
             "index.html",
@@ -99,7 +106,7 @@ async def debug_run_detail(request: Request, run_id: str) -> HTMLResponse:
         return templates.TemplateResponse(
             request,
             "index.html",
-            {"title": "调试生成", "error": f"run not found: {run_id}"},
+            {"title": "调试生成", "error": f"未找到运行记录：{run_id}"},
             status_code=404,
         )
     dto = run_to_dto(run)

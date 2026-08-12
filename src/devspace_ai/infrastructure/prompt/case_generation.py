@@ -1,5 +1,11 @@
+"""用例草稿生成提示词。
+
+`repair_issues` 非空时追加修正指令，驱动模型整包重出 JSON（不是局部 patch）。
+"""
+
 import json
 
+# 嵌入 system prompt，约束返回字段，减少自由文本
 SCHEMA_HINT = {
     "drafts": [
         {
@@ -33,7 +39,7 @@ def build_messages(
     else:
         user = requirement_text
     if repair_issues:
-        user += "\n\nFix these validation issues and return full JSON again:\n- " + "\n- ".join(
+        user += "\n\n请根据以下校验问题修正，并重新返回完整 JSON：\n- " + "\n- ".join(
             repair_issues
         )
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]

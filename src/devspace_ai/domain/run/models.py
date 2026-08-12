@@ -1,3 +1,8 @@
+"""一次生成运行（GenerationRun）的领域表示。
+
+run 是可回查的审计单元：输入文本、产出草稿、校验问题、Graph 步骤轨迹都挂在这里。
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -12,11 +17,14 @@ class RunStatus(StrEnum):
     RUNNING = "running"
     SUCCEEDED = "succeeded"
     FAILED = "failed"
+    # 既有合法草稿又有校验问题：部分可用，需人工筛
     PARTIAL = "partial"
 
 
 @dataclass(frozen=True)
 class Issue:
+    """结构化问题：既给 API 消费，也回传给模型做一轮 repair。"""
+
     code: str
     message: str
     draft_index: int | None = None
@@ -25,6 +33,8 @@ class Issue:
 
 @dataclass
 class StepRecord:
+    """Graph 单步执行记录，写入 trace 便于调试耗时与 token。"""
+
     step_name: str
     status: str
     started_at: datetime
@@ -48,6 +58,7 @@ class GenerationRun:
     drafts: list[CaseDraft] = field(default_factory=list)
     issues: list[Issue] = field(default_factory=list)
     trace: RunTrace = field(default_factory=RunTrace)
+    # 便捷字段：取 issues[0].message，便于列表/摘要展示
     error: str | None = None
 
     @classmethod

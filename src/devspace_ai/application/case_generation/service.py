@@ -1,3 +1,11 @@
+"""用例草稿生成应用服务：固定 Graph 编排。
+
+流程（同步一次请求内完成）：
+  ingest_requirement → generate_cases → validate_cases（必要时带 issues 重试一次）→ persist
+
+本服务只产出草稿与运行记录；业务系统在人工确认后再落库到自己的用例库。
+"""
+
 from __future__ import annotations
 
 import asyncio
@@ -20,28 +28,32 @@ from devspace_ai.infrastructure.source.text_ingest import ingest_text, ingest_up
 
 
 class CaseGenerationService:
+    """用例草稿生成用例（use case）入口，依赖 Model / Run 两个出站端口。"""
+
     def __init__(self, settings: Settings, model: ModelPort, runs: RunRepositoryPort) -> None:
         self.settings = settings
         self.model = model
         self.runs = runs
 
     async def generate(self, command: GenerateCaseDraftsCommand) -> GenerateCaseDraftsResult:
+        # text / file 二选一；两者都给或都不给都视为非法输入
         has_text = command.text is not None and str(command.text).strip() != ""
         has_file = command.file_bytes is not None
         if has_text == has_file:
-            raise InputRejectedError("INVALID_INPUT", "provide exactly one of text or file")
+            raise InputRejectedError("INVALID_INPUT", "请只提供文本或文件其中一种")
 
         if command.max_cases is None:
             max_cases = self.settings.default_max_cases
         else:
             max_cases = command.max_cases
+        # hard_max_cases 是服务端硬上限，防止一次请求打爆模型配额
         if max_cases > self.settings.hard_max_cases:
             raise InputRejectedError(
                 "MAX_CASES_EXCEEDED",
-                f"max_cases {max_cases} exceeds hard limit {self.settings.hard_max_cases}",
+                f"用例数量上限 {max_cases} 超出硬限制 {self.settings.hard_max_cases}",
             )
         if max_cases < 1:
-            raise InputRejectedError("INVALID_INPUT", "max_cases must be >= 1")
+            raise InputRejectedError("INVALID_INPUT", "用例数量上限必须大于等于 1")
 
         if has_file:
             doc = ingest_upload(
@@ -66,6 +78,7 @@ class CaseGenerationService:
         )
 
         try:
+            # 整段生成+校验受 total_timeout 约束（含一次 repair 重试）
             drafts, issues = await asyncio.wait_for(
                 self._generate_and_validate(
                     doc.text, max_cases, command.language, command.domain_hint, run
@@ -75,10 +88,11 @@ class CaseGenerationService:
             status = resolve_status(len(drafts), len(issues))
             run.finish(status, drafts, issues)
         except (TimeoutError, httpx.TimeoutException):
+            # asyncio 超时与 httpx 单次调用超时统一映射为 MODEL_TIMEOUT
             run.finish(
                 RunStatus.FAILED,
                 [],
-                [Issue("MODEL_TIMEOUT", "model or total request timed out")],
+                [Issue("MODEL_TIMEOUT", "模型调用或整次请求超时")],
             )
             run.trace.steps.append(
                 StepRecord(
@@ -86,10 +100,11 @@ class CaseGenerationService:
                     "failed",
                     datetime.now(UTC),
                     datetime.now(UTC),
-                    error="timeout",
+                    error="超时",
                 )
             )
         except Exception as exc:
+            # 未预期异常也落库，便于调试页/GET run 回看
             run.finish(
                 RunStatus.FAILED,
                 [],
@@ -104,6 +119,7 @@ class CaseGenerationService:
                     error=type(exc).__name__,
                 )
             )
+        # 无论成功失败都持久化，API 可按 run_id 回查
         self.runs.save(run)
         return GenerateCaseDraftsResult(
             run.run_id, run.status, run.drafts, run.issues, run.trace, run.error
@@ -117,6 +133,7 @@ class CaseGenerationService:
         domain_hint: str | None,
         run: GenerationRun,
     ) -> tuple[list[CaseDraft], list[Issue]]:
+        """调用模型并做结构校验；若有校验问题则带 issues 再生成一次（最多一轮 repair）。"""
         started = datetime.now(UTC)
         raw = await self.model.generate_case_drafts(
             text,
@@ -138,6 +155,7 @@ class CaseGenerationService:
             )
         )
         if issues:
+            # 把校验失败信息回传给模型，期望修掉非法草稿；仍可能留下 PARTIAL
             started = datetime.now(UTC)
             raw = await self.model.generate_case_drafts(
                 text,
@@ -171,20 +189,21 @@ class CaseGenerationService:
     def _validate_raw(
         self, raw_drafts: list[dict[str, object]]
     ) -> tuple[list[CaseDraft], list[Issue]]:
+        """逐条解析模型 JSON：合法进 drafts，非法进 issues（不中断整批）。"""
         valid: list[CaseDraft] = []
         issues: list[Issue] = []
         for idx, item in enumerate(raw_drafts or []):
             try:
                 if not isinstance(item, dict):
-                    raise CaseDraftValidationError("draft must be an object", field=None)
+                    raise CaseDraftValidationError("草稿必须是对象", field=None)
                 steps_raw = item.get("steps") or []
                 if not isinstance(steps_raw, list):
-                    raise CaseDraftValidationError("steps must be a list", field="steps")
+                    raise CaseDraftValidationError("steps 必须是数组", field="steps")
                 steps: list[TestStep] = []
                 for step_i, s in enumerate(steps_raw):
                     if not isinstance(s, dict):
                         raise CaseDraftValidationError(
-                            "step must be an object",
+                            "步骤必须是对象",
                             field=f"steps[{step_i}]",
                         )
                     step_dict = cast(dict[str, Any], s)
@@ -201,10 +220,10 @@ class CaseGenerationService:
                 tags_raw = item.get("tags") or []
                 if not isinstance(preconditions_raw, list):
                     raise CaseDraftValidationError(
-                        "preconditions must be a list", field="preconditions"
+                        "preconditions 必须是数组", field="preconditions"
                     )
                 if not isinstance(tags_raw, list):
-                    raise CaseDraftValidationError("tags must be a list", field="tags")
+                    raise CaseDraftValidationError("tags 必须是数组", field="tags")
                 draft = CaseDraft(
                     title=str(item.get("title", "")),
                     preconditions=[str(x) for x in preconditions_raw],
@@ -225,8 +244,9 @@ class CaseGenerationService:
                         field=field if isinstance(field, str) else None,
                     )
                 )
+        # 模型返回空列表时也要给出可观测 issue，避免「静默成功但无草稿」
         if not valid and not issues:
-            issues.append(Issue("NO_VALID_DRAFTS", "model returned no drafts"))
+            issues.append(Issue("NO_VALID_DRAFTS", "模型未返回任何用例草稿"))
         return valid, issues
 
 
