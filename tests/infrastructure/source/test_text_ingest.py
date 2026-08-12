@@ -1,6 +1,7 @@
 import pytest
-from devspace_ai.infrastructure.source.text_ingest import ingest_text, ingest_upload
+
 from devspace_ai.application.case_generation.errors import InputRejectedError
+from devspace_ai.infrastructure.source.text_ingest import ingest_text, ingest_upload
 
 
 def test_reject_empty_text():

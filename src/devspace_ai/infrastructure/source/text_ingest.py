@@ -13,10 +13,20 @@ def ingest_text(text: str, *, max_chars: int) -> RequirementDocument:
             "INPUT_TOO_LONG",
             f"text length {len(normalized)} exceeds limit {max_chars}",
         )
-    return RequirementDocument(source_type="paste", text=normalized, metadata={"chars": len(normalized)})
+    return RequirementDocument(
+        source_type="paste",
+        text=normalized,
+        metadata={"chars": len(normalized)},
+    )
 
 
-def ingest_upload(filename: str, raw: bytes, *, max_bytes: int, max_chars: int) -> RequirementDocument:
+def ingest_upload(
+    filename: str,
+    raw: bytes,
+    *,
+    max_bytes: int,
+    max_chars: int,
+) -> RequirementDocument:
     name = filename or ""
     lower = name.lower()
     if not any(lower.endswith(suf) for suf in ALLOWED_SUFFIXES):
