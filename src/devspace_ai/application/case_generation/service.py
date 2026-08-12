@@ -87,6 +87,21 @@ class CaseGenerationService:
                     error="timeout",
                 )
             )
+        except Exception as exc:
+            run.finish(
+                RunStatus.FAILED,
+                [],
+                [Issue("INTERNAL_ERROR", str(exc) or type(exc).__name__)],
+            )
+            run.trace.steps.append(
+                StepRecord(
+                    "generate_cases",
+                    "failed",
+                    datetime.now(UTC),
+                    datetime.now(UTC),
+                    error=type(exc).__name__,
+                )
+            )
         self.runs.save(run)
         return GenerateCaseDraftsResult(
             run.run_id, run.status, run.drafts, run.issues, run.trace, run.error
@@ -158,21 +173,36 @@ class CaseGenerationService:
         issues: list[Issue] = []
         for idx, item in enumerate(raw_drafts or []):
             try:
+                if not isinstance(item, dict):
+                    raise CaseDraftValidationError("draft must be an object", field=None)
                 steps_raw = item.get("steps") or []
                 if not isinstance(steps_raw, list):
                     raise CaseDraftValidationError("steps must be a list", field="steps")
-                steps = [
-                    TestStep(
-                        action=str(cast(dict[str, Any], s).get("action", "")),
-                        expected=str(cast(dict[str, Any], s).get("expected", "")),
-                        test_data=_optional_str(cast(dict[str, Any], s).get("test_data")),
+                steps: list[TestStep] = []
+                for step_i, s in enumerate(steps_raw):
+                    if not isinstance(s, dict):
+                        raise CaseDraftValidationError(
+                            "step must be an object",
+                            field=f"steps[{step_i}]",
+                        )
+                    step_dict = cast(dict[str, Any], s)
+                    steps.append(
+                        TestStep(
+                            action=str(step_dict.get("action", "")),
+                            expected=str(step_dict.get("expected", "")),
+                            test_data=_optional_str(step_dict.get("test_data")),
+                        )
                     )
-                    for s in steps_raw
-                ]
                 priority = item.get("priority")
                 rationale = item.get("rationale")
-                preconditions_raw = cast(list[object], item.get("preconditions") or [])
-                tags_raw = cast(list[object], item.get("tags") or [])
+                preconditions_raw = item.get("preconditions") or []
+                tags_raw = item.get("tags") or []
+                if not isinstance(preconditions_raw, list):
+                    raise CaseDraftValidationError(
+                        "preconditions must be a list", field="preconditions"
+                    )
+                if not isinstance(tags_raw, list):
+                    raise CaseDraftValidationError("tags must be a list", field="tags")
                 draft = CaseDraft(
                     title=str(item.get("title", "")),
                     preconditions=[str(x) for x in preconditions_raw],
@@ -183,7 +213,7 @@ class CaseGenerationService:
                 )
                 draft.validate()
                 valid.append(draft)
-            except (CaseDraftValidationError, TypeError, ValueError) as exc:
+            except (CaseDraftValidationError, TypeError, ValueError, AttributeError) as exc:
                 field = getattr(exc, "field", None)
                 issues.append(
                     Issue(
