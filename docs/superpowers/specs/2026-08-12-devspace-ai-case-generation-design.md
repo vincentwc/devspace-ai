@@ -60,6 +60,29 @@
 | DEC-008 | 架构姿态：愿景=Agent 平台；v1=固定 Graph 瘦 Agent，预留 Tool/Capability 扩展 |
 | DEC-009 | 代码结构：轻量 DDD + 六边形（Ports & Adapters） |
 | DEC-010 | 测试步骤字段包含可空 `test_data` |
+| DEC-011 | 生成 API 同步阻塞：请求等到 Graph 结束（或超时）再返回完整 `drafts`/`trace`；对外状态不含 `queued` |
+| DEC-012 | Run 状态：全部通过 → `succeeded`；≥1 条可用 → `partial`；0 条可用 → `failed` |
+| DEC-013 | 超长输入直接拒绝（默认 50k 字符，可配置）；错误信息明确说明原因与当前上限 |
+| DEC-014 | `max_cases` 默认 10，硬顶 30；超硬顶明确 4xx |
+| DEC-015 | 分层超时：模型默认 120s，HTTP 总超时默认 150s（均可配置）；超时 → `failed` 并落库失败 Run |
+| DEC-016 | 统一 `issues[]: { code, message, draft_index?, field? }`；4xx 与 failed/partial 共用 code+message 风格 |
+| DEC-017 | 无密钥或 `MODEL_PROVIDER=fake` 时使用确定性 Fake Model，仍走完整 Graph |
+| DEC-018 | 调试页：FastAPI + Jinja + 少量原生 JS；无独立前端构建 |
+| DEC-019 | 生成接口统一 `multipart/form-data`；`text`/`file` 恰好二选一 |
+| DEC-020 | 上传默认上限 1 MiB（可配置）；超出明确 4xx |
+| DEC-021 | `tags` 类型为可选字符串列表 |
+
+## 3.1 方案取舍
+
+曾比较三种架构：
+
+| 方案 | 要点 | 结论 |
+| --- | --- | --- |
+| 1. 能力插件式瘦服务 | 稳定 API + Capability 插件 | v1 形态采纳（固定 Graph 实现首个 Capability） |
+| 2. TMS 适配器中枢 | AI 服务内维护各系统字段映射/写入 | **排除**：易绑死首个 TMS，与「只返回草稿」冲突 |
+| 3. 完整 Agent 平台 | 多 Agent 路由、注册中心、长期记忆 | **愿景采纳，v1 排除直接落地**：过重；v1 用可演进瘦 Graph，对外契约稳定后再升级编排 |
+
+最终姿态：**愿景 = 方案 3；v1 = 方案 1 形态的可演进瘦 Agent（同步 API、只出 `CaseDraft`）**。
 
 ## 4. 架构
 
@@ -152,7 +175,7 @@ infrastructure → application.port / domain
 | `preconditions` | 可选，字符串列表 |
 | `steps[]` | 至少 1 项 |
 | `priority` | 可选：`P0` \| `P1` \| `P2` \| `P3` |
-| `tags` | 可选 |
+| `tags` | 可选，字符串列表 |
 | `rationale` | 可选，便于人工确认 |
 
 ### 5.3 TestStep
@@ -170,61 +193,81 @@ infrastructure → application.port / domain
 | 字段 | 说明 |
 | --- | --- |
 | `run_id` | 唯一标识 |
-| `status` | `queued` \| `running` \| `succeeded` \| `failed` \| `partial` |
+| `status` | `running` \| `succeeded` \| `failed` \| `partial`（对外不同步暴露 `queued`） |
 | `input` | 输入摘要/正文（受长度上限约束） |
 | `drafts` | 通过校验的 `CaseDraft[]` |
 | `trace.steps[]` | 每步名称、起止时间、摘要、token、错误 |
-| `error` | 失败时的错误信息 |
+| `issues[]` | `{ code, message, draft_index?, field? }` |
+| `error` | 可选；与首要 issue 对齐的人类可读摘要 |
+
+状态判定：
+
+- 全部草稿通过校验 → `succeeded`
+- 至少 1 条可用草稿且存在未通过/纠错残留问题 → `partial`
+- 0 条可用草稿（含模型失败、超时、全员校验失败）→ `failed`
 
 ### 5.5 对外 API
 
-#### `POST /api/v1/case-drafts/generate`
+#### `POST /api/v1/case-drafts/generate`（同步）
 
-- 入参：粘贴文本 **或** 上传文件（二选一）；可选 `options`：
-  - `language`（默认 `zh-CN`）
-  - `max_cases`（用例数量上限）
-  - `domain_hint`（可选补充说明）
-- 出参：`run_id`、`status`、`drafts`、`trace`
+- Content-Type：`multipart/form-data`
+- 字段：`text`（可选）、`file`（可选）、`language`（默认 `zh-CN`）、`max_cases`（默认 10，硬顶 30）、`domain_hint`（可选）
+- 校验：`text` 与 `file` 必须恰好提供其一；否则 4xx，`issues/code+message` 说明原因
+- 行为：阻塞至 Graph 完成或总超时；响应包含 `run_id`、`status`、`drafts`、`trace`、`issues`
+- 超长文本（默认 >50k 字符）或超大文件（默认 >1 MiB）：不调用模型，直接 4xx，明确原因与当前上限
 
 #### `GET /api/v1/runs/{run_id}`
 
-- 回放结果与轨迹
+- 回放结果与轨迹（含失败/超时已落库的 Run）
 
 API 使用 OpenAPI 描述；HTTP DTO 与 domain 对象分离，映射发生在 `interfaces` 层。
+
+### 5.6 错误与 issues 约定
+
+| 场景 | HTTP | status（若已创建 Run） | 示例 code |
+| --- | --- | --- | --- |
+| 未提供 text/file 或同时提供 | 400 | （无 Run 或未执行） | `INVALID_INPUT` |
+| 文本超长 | 400 | — | `INPUT_TOO_LONG` |
+| 文件过大 / 类型不支持 | 400 | — | `FILE_TOO_LARGE` / `UNSUPPORTED_FILE_TYPE` |
+| `max_cases` 超硬顶 | 400 | — | `MAX_CASES_EXCEEDED` |
+| 模型超时 | 200（已落库失败 Run，便于回放） | `failed` | `MODEL_TIMEOUT` |
+| 无可用草稿 | 200 | `failed` | `NO_VALID_DRAFTS` |
+| 部分可用 | 200 | `partial` | `DRAFT_VALIDATION_FAILED` 等 |
 
 ## 6. 主流程（固定瘦 Agent Graph）
 
 ```text
 1. ingest_requirement
-   - paste/upload → RequirementDocument
-   - 抽文本、截断或拒绝超长输入，并在 trace 标明
+   - multipart text/file → RequirementDocument
+   - 超长/超大：直接拒绝（不进模型）；合法输入进入后续步骤
 2. generate_cases
-   - ModelPort + 提示词 → 原始结构化输出
+   - ModelPort（真实兼容网关或 Fake）+ 提示词 → 原始结构化输出
    - 反序列化为 CaseDraft 候选
 3. validate_cases
    - 领域校验
    - 失败则带错误反馈再生成一次（最多 1 次）
-   - 仍失败 → status=`partial` 或 `failed`；返回已通过子集 + 问题列表
+   - 按 DEC-012 判定 succeeded / partial / failed，填充 issues[]
 4. persist_run
-   - 保存 Run + Trace，供调试页回放
+   - 保存 Run + Trace + issues（含超时失败），供调试页回放
 ```
 
-应用层只负责编排；领域负责草稿合法性与 Run 状态迁移；基础设施负责 LLM、文件与存储。
+应用层只负责编排；领域负责草稿合法性与 Run 状态迁移；基础设施负责 LLM、文件与存储。  
+同步语义：`POST /generate` 在步骤 1–4 完成后返回（或总超时后返回已落库的失败 Run）。
 
 ## 7. 调试页
 
-调试页属于 `interfaces/web_debug`，必须调用与对外相同的 application/API，禁止旁路实现。
+调试页属于 `interfaces/web_debug`，技术选型为 **FastAPI + Jinja + 少量原生 JS**（无独立前端构建）。必须调用与对外相同的 application/API，禁止旁路实现。
 
 v1 能力：
 
-1. 输入：粘贴文本；上传 `txt` / `md`
-2. 选项：语言、用例数量上限、领域提示
-3. 触发生成：`POST /api/v1/case-drafts/generate`
-4. 结果：用例卡片（含 `test_data`）、一键复制 JSON
+1. 输入：粘贴文本；上传 `txt` / `md`（≤1 MiB）
+2. 选项：语言、用例数量上限（默认 10）、领域提示
+3. 触发生成：同步调用 `POST /api/v1/case-drafts/generate`（multipart）
+4. 结果：用例卡片（含 `test_data`）、一键复制 JSON；展示 `issues`
 5. 轨迹：`ingest → generate → validate` 的状态与摘要
-6. 历史：按 `run_id` 查看最近 Run
+6. 历史：按 `run_id` 查看最近 Run（含失败/超时）
 
-非目标：登录、权限、多租户、编辑后回写业务库。
+非目标：登录、权限、多租户、编辑后回写业务库、独立 SPA。
 
 ## 8. 可观测性与配置
 
@@ -246,13 +289,17 @@ v1 能力：
 
 ### 8.2 配置项
 
-| 配置 | 用途 |
-| --- | --- |
-| `MODEL_BASE_URL` | 兼容网关地址 |
-| `MODEL_API_KEY` | 密钥（环境变量，不入库） |
-| `MODEL_NAME` | 模型名 |
-| 文本长度上限 | 默认建议 50k 字符，可配置 |
-| 超时 / 用例数上限 / 上传大小 | 可配置 |
+| 配置 | 默认 | 用途 |
+| --- | --- | --- |
+| `MODEL_BASE_URL` | — | 兼容网关地址 |
+| `MODEL_API_KEY` | — | 密钥（环境变量，不入库） |
+| `MODEL_NAME` | — | 模型名 |
+| `MODEL_PROVIDER` | 无密钥时视为 `fake` | `openai_compatible` / `fake` |
+| 文本长度上限 | 50k 字符 | 超出拒绝 |
+| 上传大小上限 | 1 MiB | 超出拒绝 |
+| `max_cases` 默认 / 硬顶 | 10 / 30 | 请求未传时用默认；超硬顶拒绝 |
+| 模型调用超时 | 120s | 仅网络/模型等待 |
+| HTTP 总超时 | 150s | 含 ingest/validate/persist |
 
 ## 9. 与业务系统的衔接（非 v1 实现）
 
@@ -270,7 +317,7 @@ v1 能力：
 | interfaces | 入参校验、DTO 映射、调试页关键路径 | APITestClient |
 | 冒烟 | 真实网关手工验证 | optional，不进默认 CI |
 
-默认 CI 在无真实模型密钥时必须全绿（使用 Fake Model）。
+默认 CI 在无真实模型密钥时必须全绿（使用确定性 Fake Model：固定结构 2～3 条样例草稿，覆盖 `test_data` 空/非空，仍走完整 Graph）。
 
 ## 11. 里程碑
 
@@ -291,17 +338,19 @@ M3 完成后，另开迭代：
 | 风险 | 对策 |
 | --- | --- |
 | 模型输出不稳定/非 JSON | 强 schema 提示 + validate 一次纠错；失败返回 partial |
-| 需求文本过长 | 可配置截断/拒绝，并在 trace 标明 |
+| 需求文本过长 | 可配置上限，默认拒绝并返回明确 4xx |
 | 过早做成重 Agent 平台 | 固定 Graph + Tool 端口；平台化进后续里程碑 |
 | 被单一 TMS 模型绑死 | 领域只认 `CaseDraft`；映射留在业务系统 |
 | 无网关无法演示 | Fake Model + 固定样例，保证本地与 CI |
 
 ## 13. 验收标准
 
-1. 调试页完成「粘贴需求 → 可读用例草稿 → 轨迹回放」。
-2. 输出 JSON 字段稳定，具备 OpenAPI；步骤含可空 `test_data`。
-3. 无真实密钥时测试通过；配置网关后可切真实模型。
-4. 新增 Capability/Tool 时无需修改 v1 对外主契约语义。
+1. 调试页（Jinja）完成同步闭环：粘贴或上传 `txt/md` → 得到符合 `CaseDraft` schema 的草稿 → 可见轨迹与 `run_id` 回放。
+2. OpenAPI 稳定；步骤含可空 `test_data`；错误与 partial 均返回 `issues[].code/message`。
+3. 无真实密钥时 Fake Model + 默认 CI 全绿；配置兼容网关后可切真实模型。
+4. 超长文本 / 超大文件 / 非法 multipart 返回明确 4xx 原因。
+5. 状态机符合 DEC-012；超时落库失败 Run 可回放。
+6. 新增 Capability/Tool 时无需修改 v1 对外主契约语义。
 
 ## 14. 开放扩展点（已选型，不阻塞 v1）
 
@@ -310,3 +359,20 @@ M3 完成后，另开迭代：
 - `case_review` Capability
 - Graph → 可配置多 Agent 编排
 - 业务系统侧批量入库适配器（`cdp-suite` 优先）
+
+## 15. Ambiguity Report
+
+> grill-me Spec 模式审阅（阈值 0.2）；决议已写回 DEC-011～DEC-021 与 §3.1 / §5.5 / §5.6。
+
+```
+Ambiguity Report:
+  Goals:        0.0   ✓ clear
+  Acceptance:   0.25  ✓ mostly clear
+  Boundaries:   0.0   ✓ clear
+  Alternatives: 0.0   ✓ clear
+  Assumptions:  0.25  ✓ mostly clear
+  ──────────────────────────────
+  Aggregate:    0.10  ✓ below threshold (0.2 spec)
+
+Push lightly on: prompt 质量无法机器强验收（属模型效果，不阻塞 v1）；Python 版本/依赖锁定留给 implementation plan。
+```
