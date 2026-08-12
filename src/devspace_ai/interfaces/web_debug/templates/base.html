@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{{ title }} · 调试</title>
+  <style>
+    :root {
+      --bg: #f6f4ef;
+      --ink: #1c1b19;
+      --muted: #5c574e;
+      --line: #d9d2c5;
+      --accent: #0b6e4f;
+      --warn: #8a3418;
+      --card: #fffdf8;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "IBM Plex Sans", "Noto Sans SC", sans-serif;
+      background: linear-gradient(160deg, #efe9dc 0%, var(--bg) 45%, #e4ece7 100%);
+      color: var(--ink);
+      min-height: 100vh;
+    }
+    header {
+      padding: 1.25rem 1.5rem;
+      border-bottom: 1px solid var(--line);
+      background: rgba(255,253,248,0.85);
+    }
+    header a { color: var(--accent); text-decoration: none; font-weight: 600; }
+    main { max-width: 920px; margin: 0 auto; padding: 1.5rem; }
+    h1 { font-size: 1.4rem; margin: 0 0 0.75rem; }
+    h2 { font-size: 1.1rem; margin: 1.5rem 0 0.5rem; }
+    label { display: block; margin: 0.75rem 0 0.25rem; color: var(--muted); font-size: 0.9rem; }
+    textarea, input[type="text"], input[type="number"], select, input[type="file"] {
+      width: 100%;
+      padding: 0.55rem 0.65rem;
+      border: 1px solid var(--line);
+      background: var(--card);
+      font: inherit;
+    }
+    textarea { min-height: 140px; resize: vertical; }
+    button, .btn {
+      margin-top: 1rem;
+      background: var(--accent);
+      color: #fff;
+      border: 0;
+      padding: 0.6rem 1rem;
+      font: inherit;
+      cursor: pointer;
+    }
+    .error { color: var(--warn); margin: 0.75rem 0; }
+    .draft, .issue, .trace-step {
+      border: 1px solid var(--line);
+      background: var(--card);
+      padding: 0.85rem 1rem;
+      margin: 0.6rem 0;
+    }
+    .meta { color: var(--muted); font-size: 0.85rem; }
+    pre.json {
+      background: #1c1b19;
+      color: #f3efe6;
+      padding: 1rem;
+      overflow: auto;
+      font-size: 0.8rem;
+      line-height: 1.4;
+    }
+    .row { display: flex; gap: 1rem; flex-wrap: wrap; }
+    .row > * { flex: 1; min-width: 140px; }
+  </style>
+</head>
+<body>
+  <header>
+    <a href="/debug/">调试页</a>
+  </header>
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

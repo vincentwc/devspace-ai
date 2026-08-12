@@ -14,6 +14,7 @@ from devspace_ai.infrastructure.model.factory import build_model_adapter
 from devspace_ai.infrastructure.persistence.pg_run_repository import PgRunRepository
 from devspace_ai.interfaces.rest.errors import input_rejected_handler
 from devspace_ai.interfaces.rest.routes_case_drafts import router as case_drafts_router
+from devspace_ai.interfaces.web_debug.routes import router as debug_router
 
 
 def create_app(
@@ -36,6 +37,8 @@ def create_app(
 
     app.add_exception_handler(InputRejectedError, input_rejected_handler)
     app.include_router(case_drafts_router)
+    if settings.debug_ui_enabled():
+        app.include_router(debug_router)
 
     make_engine = engine_factory or (lambda url: create_engine(url, pool_pre_ping=True))
 

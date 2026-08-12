@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>生成用例</h1>
+<p class="meta">粘贴需求或上传 txt/md，调用与 API 相同的 CaseGenerationService。</p>
+{% if error %}
+<p class="error">{{ error }}</p>
+{% endif %}
+<form action="/debug/generate" method="post" enctype="multipart/form-data">
+  <label for="text">需求文本</label>
+  <textarea id="text" name="text" placeholder="粘贴需求…">{{ text or "" }}</textarea>
+
+  <label for="file">或上传文件</label>
+  <input id="file" type="file" name="file" accept=".txt,.md,text/plain,text/markdown" />
+
+  <div class="row">
+    <div>
+      <label for="language">语言</label>
+      <input id="language" type="text" name="language" value="{{ language or 'zh-CN' }}" />
+    </div>
+    <div>
+      <label for="max_cases">用例数量上限</label>
+      <input id="max_cases" type="number" name="max_cases" min="1" max="30" value="{{ max_cases or '' }}" placeholder="默认 10" />
+    </div>
+  </div>
+
+  <label for="domain_hint">领域提示</label>
+  <input id="domain_hint" type="text" name="domain_hint" value="{{ domain_hint or '' }}" />
+
+  <button type="submit">生成用例</button>
+</form>
+{% endblock %}

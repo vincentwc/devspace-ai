@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Run {{ run.run_id }}</h1>
+<p class="meta">状态：{{ run.status }} · <a href="/debug/runs/{{ run.run_id }}">回放链接</a> · <a href="/debug/">再生成</a></p>
+
+<h2>草稿</h2>
+{% if not run.drafts %}
+<p class="meta">无可用草稿</p>
+{% endif %}
+{% for draft in run.drafts %}
+<section class="draft">
+  <strong>{{ draft.title }}</strong>
+  {% if draft.priority %}<span class="meta"> · {{ draft.priority }}</span>{% endif %}
+  {% if draft.tags %}<span class="meta"> · {{ draft.tags | join(", ") }}</span>{% endif %}
+  {% if draft.preconditions %}
+  <p class="meta">前置：{{ draft.preconditions | join("；") }}</p>
+  {% endif %}
+  <ol>
+    {% for step in draft.steps %}
+    <li>
+      <div>动作：{{ step.action }}</div>
+      <div>期望：{{ step.expected }}</div>
+      <div>test_data：{{ step.test_data if step.test_data is not none else "—" }}</div>
+    </li>
+    {% endfor %}
+  </ol>
+  {% if draft.rationale %}<p class="meta">{{ draft.rationale }}</p>{% endif %}
+</section>
+{% endfor %}
+
+<h2>Issues</h2>
+{% if not run.issues %}
+<p class="meta">无 issues</p>
+{% else %}
+{% for issue in run.issues %}
+<div class="issue">
+  <strong>{{ issue.code }}</strong> — {{ issue.message }}
+  {% if issue.draft_index is not none %}<span class="meta"> · draft_index={{ issue.draft_index }}</span>{% endif %}
+  {% if issue.field %}<span class="meta"> · field={{ issue.field }}</span>{% endif %}
+</div>
+{% endfor %}
+{% endif %}
+
+<h2>轨迹</h2>
+{% for step in run.trace.steps %}
+<div class="trace-step">
+  <strong>{{ step.step_name }}</strong>
+  <span class="meta"> · {{ step.status }}</span>
+  {% if step.summary %}<div class="meta">{{ step.summary }}</div>{% endif %}
+  {% if step.error %}<div class="error">{{ step.error }}</div>{% endif %}
+</div>
+{% endfor %}
+
+<h2>JSON 复制</h2>
+<p class="meta">完整 Run JSON（含 drafts / issues / trace）</p>
+<pre class="json" id="json-block">{{ json_block }}</pre>
+<button type="button" onclick="navigator.clipboard.writeText(document.getElementById('json-block').innerText)">复制 JSON</button>
+{% endblock %}
