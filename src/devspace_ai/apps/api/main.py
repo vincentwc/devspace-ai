@@ -56,15 +56,15 @@ def create_app(
     app = FastAPI(title="devspace-ai", version="0.1.0")
     app.state.settings = settings
 
-    if case_generation_service is None:
-        model = build_model_adapter(settings)
-        runs = PgRunRepository(settings.database_url)
-        case_generation_service = CaseGenerationService(settings, model, runs)
-    app.state.case_generation_service = case_generation_service
-
     if style_pack_service is None:
         style_pack_service = StylePackService(PgStylePackRepository(settings.database_url))
     app.state.style_pack_service = style_pack_service
+
+    if case_generation_service is None:
+        model = build_model_adapter(settings)
+        runs = PgRunRepository(settings.database_url)
+        case_generation_service = CaseGenerationService(settings, model, runs, style_pack_service)
+    app.state.case_generation_service = case_generation_service
 
     app.add_exception_handler(InputRejectedError, input_rejected_handler)
     app.add_exception_handler(PackNotFoundError, pack_not_found_handler)

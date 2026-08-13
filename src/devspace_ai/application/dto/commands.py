@@ -12,3 +12,4 @@ class GenerateCaseDraftsCommand:
     language: str = "zh-CN"
     max_cases: int | None = None  # None → 使用 Settings.default_max_cases
     domain_hint: str | None = None
+    style_pack_id: str | None = None  # None / 空字符串 → 未选包

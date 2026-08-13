@@ -69,6 +69,7 @@ class GenerationRunDTO(BaseModel):
     issues: list[IssueDTO]
     trace: RunTraceDTO
     error: str | None = None
+    style_pack: StylePackDetailDTO | None = None
 
 
 def issue_to_dto(issue: Issue) -> IssueDTO:
@@ -119,6 +120,7 @@ def result_to_dto(result: GenerateCaseDraftsResult) -> GenerationRunDTO:
         issues=[issue_to_dto(i) for i in result.issues],
         trace=trace_to_dto(result.trace),
         error=result.error,
+        style_pack=pack_to_detail_dto(result.style_pack) if result.style_pack else None,
     )
 
 
@@ -130,6 +132,7 @@ def run_to_dto(run: GenerationRun) -> GenerationRunDTO:
         issues=[issue_to_dto(i) for i in run.issues],
         trace=trace_to_dto(run.trace),
         error=run.error,
+        style_pack=pack_to_detail_dto(run.style_pack) if run.style_pack else None,
     )
 
 
@@ -253,3 +256,6 @@ def body_to_style_pack(
         examples=[_dto_to_example(ex) for ex in body.examples],
         builtin=False,
     )
+
+
+GenerationRunDTO.model_rebuild()

@@ -11,6 +11,7 @@ from enum import StrEnum
 from uuid import uuid4
 
 from devspace_ai.domain.case_draft.models import CaseDraft
+from devspace_ai.domain.style_pack.models import StylePack
 
 
 class RunStatus(StrEnum):
@@ -60,6 +61,7 @@ class GenerationRun:
     trace: RunTrace = field(default_factory=RunTrace)
     # 便捷字段：取 issues[0].message，便于列表/摘要展示
     error: str | None = None
+    style_pack: StylePack | None = None
 
     @classmethod
     def start(cls, input_text: str) -> GenerationRun:

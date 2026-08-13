@@ -5,9 +5,12 @@ from devspace_ai.application.case_generation.errors import InputRejectedError
 from devspace_ai.application.case_generation.service import CaseGenerationService
 from devspace_ai.application.dto.commands import GenerateCaseDraftsCommand
 from devspace_ai.application.port.outbound.model_port import ModelGenerationResult
+from devspace_ai.application.style_pack.service import StylePackService
 from devspace_ai.domain.run.models import GenerationRun, RunStatus
+from devspace_ai.domain.style_pack.models import StylePack
 from devspace_ai.infrastructure.config.settings import Settings
 from devspace_ai.infrastructure.model.fake_model import FakeModelAdapter
+from devspace_ai.infrastructure.style_pack.builtins import BUILTIN_PAYMENT_ID
 
 _VALID_DRAFT: dict[str, object] = {
     "title": "主路径验证",
@@ -50,6 +53,7 @@ class ScriptedModel:
         self._responses = list(responses)
         self.calls = 0
         self.repair_calls = 0
+        self.style_pack: object | None = None
 
     async def generate_case_drafts(
         self,
@@ -61,7 +65,7 @@ class ScriptedModel:
         repair_issues: list[str] | None,
         style_pack: object | None = None,
     ) -> ModelGenerationResult:
-        _ = style_pack
+        self.style_pack = style_pack
         self.calls += 1
         if repair_issues is not None:
             self.repair_calls += 1
@@ -81,6 +85,7 @@ async def test_happy_path_succeeded() -> None:
         settings=Settings(_env_file=None),
         model=FakeModelAdapter(),
         runs=repo,
+        style_packs=_style_packs(),
     )
     result = await svc.generate(
         GenerateCaseDraftsCommand(text="用户登录", file_name=None, file_bytes=None)
@@ -96,6 +101,7 @@ async def test_max_cases_hard_limit() -> None:
         settings=Settings(_env_file=None),
         model=FakeModelAdapter(),
         runs=InMemoryRunRepository(),
+        style_packs=_style_packs(),
     )
     with pytest.raises(InputRejectedError) as ei:
         await svc.generate(
@@ -110,6 +116,7 @@ async def test_xor_input() -> None:
         settings=Settings(_env_file=None),
         model=FakeModelAdapter(),
         runs=InMemoryRunRepository(),
+        style_packs=_style_packs(),
     )
     with pytest.raises(InputRejectedError) as ei:
         await svc.generate(GenerateCaseDraftsCommand(text="x", file_name="a.txt", file_bytes=b"x"))
@@ -122,6 +129,7 @@ async def test_xor_zero_input() -> None:
         settings=Settings(_env_file=None),
         model=FakeModelAdapter(),
         runs=InMemoryRunRepository(),
+        style_packs=_style_packs(),
     )
     with pytest.raises(InputRejectedError) as ei:
         await svc.generate(GenerateCaseDraftsCommand(text=None, file_name=None, file_bytes=None))
@@ -136,6 +144,7 @@ async def test_repair_retry_then_succeeded() -> None:
         settings=Settings(_env_file=None),
         model=model,
         runs=repo,
+        style_packs=_style_packs(),
     )
     result = await svc.generate(
         GenerateCaseDraftsCommand(text="用户登录", file_name=None, file_bytes=None)
@@ -161,6 +170,7 @@ async def test_partial_status_mixed_valid_invalid() -> None:
         settings=Settings(_env_file=None),
         model=model,
         runs=repo,
+        style_packs=_style_packs(),
     )
     result = await svc.generate(
         GenerateCaseDraftsCommand(text="用户登录", file_name=None, file_bytes=None)
@@ -194,6 +204,7 @@ async def test_model_timeout_persists_failed_run() -> None:
         settings=Settings(_env_file=None),
         model=TimeoutModel(),
         runs=repo,
+        style_packs=_style_packs(),
     )
     result = await svc.generate(
         GenerateCaseDraftsCommand(text="用户登录", file_name=None, file_bytes=None)
@@ -210,6 +221,7 @@ async def test_httpx_timeout_maps_to_model_timeout() -> None:
         settings=Settings(_env_file=None),
         model=HttpxTimeoutModel(),
         runs=repo,
+        style_packs=_style_packs(),
     )
     result = await svc.generate(
         GenerateCaseDraftsCommand(text="用户登录", file_name=None, file_bytes=None)
@@ -226,6 +238,7 @@ async def test_unexpected_error_persists_failed_run() -> None:
         settings=Settings(_env_file=None),
         model=ConnectionErrorModel(),
         runs=repo,
+        style_packs=_style_packs(),
     )
     result = await svc.generate(
         GenerateCaseDraftsCommand(text="用户登录", file_name=None, file_bytes=None)
@@ -233,3 +246,177 @@ async def test_unexpected_error_persists_failed_run() -> None:
     assert result.status == RunStatus.FAILED
     assert result.issues[0].code == "INTERNAL_ERROR"
     assert repo.get(result.run_id) is not None
+
+
+class EmptyStylePackRepository:
+    """生成测试只需 get；未知 id 走仓储 miss → PackNotFoundError。"""
+
+    def list_user(self) -> list[StylePack]:
+        return []
+
+    def get(self, id: str) -> StylePack | None:
+        return None
+
+    def create(self, pack: StylePack) -> StylePack:
+        raise NotImplementedError
+
+    def update(self, pack: StylePack) -> StylePack | None:
+        return None
+
+    def delete(self, id: str) -> bool:
+        return False
+
+    def count(self) -> int:
+        return 0
+
+    def get_by_key(self, key: str) -> StylePack | None:
+        return None
+
+
+def _style_packs() -> StylePackService:
+    return StylePackService(EmptyStylePackRepository())
+
+
+@pytest.mark.asyncio
+async def test_generate_with_builtin_style_pack_loads_context() -> None:
+    model = ScriptedModel([[_VALID_DRAFT]])
+    repo = InMemoryRunRepository()
+    svc = CaseGenerationService(
+        settings=Settings(_env_file=None),
+        model=model,
+        runs=repo,
+        style_packs=_style_packs(),
+    )
+    result = await svc.generate(
+        GenerateCaseDraftsCommand(
+            text="用户登录",
+            file_name=None,
+            file_bytes=None,
+            style_pack_id=BUILTIN_PAYMENT_ID,
+        )
+    )
+    assert model.style_pack is not None
+    assert any(s.step_name == "load_style_context" for s in result.trace.steps)
+    step = next(s for s in result.trace.steps if s.step_name == "load_style_context")
+    assert result.style_pack is not None
+    assert result.style_pack.builtin is True
+    assert step.summary == (
+        f"{result.style_pack.name}（{result.style_pack.key}），"
+        f"需求 {len(result.style_pack.examples)} 组，"
+        f"用例 {result.style_pack.draft_count()} 条"
+    )
+
+
+@pytest.mark.asyncio
+async def test_generate_without_style_pack_omits_load_step() -> None:
+    model = ScriptedModel([[_VALID_DRAFT]])
+    repo = InMemoryRunRepository()
+    svc = CaseGenerationService(
+        settings=Settings(_env_file=None),
+        model=model,
+        runs=repo,
+        style_packs=_style_packs(),
+    )
+    result = await svc.generate(
+        GenerateCaseDraftsCommand(text="用户登录", file_name=None, file_bytes=None)
+    )
+    assert model.style_pack is None
+    assert all(s.step_name != "load_style_context" for s in result.trace.steps)
+    assert result.style_pack is None
+
+
+@pytest.mark.asyncio
+async def test_generate_empty_style_pack_id_is_unselected() -> None:
+    model = ScriptedModel([[_VALID_DRAFT]])
+    repo = InMemoryRunRepository()
+    svc = CaseGenerationService(
+        settings=Settings(_env_file=None),
+        model=model,
+        runs=repo,
+        style_packs=_style_packs(),
+    )
+    result = await svc.generate(
+        GenerateCaseDraftsCommand(
+            text="用户登录",
+            file_name=None,
+            file_bytes=None,
+            style_pack_id="",
+        )
+    )
+    assert model.style_pack is None
+    assert result.style_pack is None
+    assert all(s.step_name != "load_style_context" for s in result.trace.steps)
+
+
+@pytest.mark.asyncio
+async def test_generate_unknown_style_pack_rejects_without_run() -> None:
+    model = ScriptedModel([[_VALID_DRAFT]])
+    repo = InMemoryRunRepository()
+    svc = CaseGenerationService(
+        settings=Settings(_env_file=None),
+        model=model,
+        runs=repo,
+        style_packs=_style_packs(),
+    )
+    with pytest.raises(InputRejectedError) as ei:
+        await svc.generate(
+            GenerateCaseDraftsCommand(
+                text="用户登录",
+                file_name=None,
+                file_bytes=None,
+                style_pack_id="00000000-0000-4000-8000-000000000099",
+            )
+        )
+    assert ei.value.code == "PACK_NOT_FOUND"
+    assert model.calls == 0
+    assert repo.store == {}
+
+
+@pytest.mark.asyncio
+async def test_generate_invalid_style_pack_id_rejects_without_model() -> None:
+    model = ScriptedModel([[_VALID_DRAFT]])
+    repo = InMemoryRunRepository()
+    svc = CaseGenerationService(
+        settings=Settings(_env_file=None),
+        model=model,
+        runs=repo,
+        style_packs=_style_packs(),
+    )
+    with pytest.raises(InputRejectedError) as ei:
+        await svc.generate(
+            GenerateCaseDraftsCommand(
+                text="用户登录",
+                file_name=None,
+                file_bytes=None,
+                style_pack_id="abc",
+            )
+        )
+    assert ei.value.code == "INVALID_INPUT"
+    assert model.calls == 0
+    assert repo.store == {}
+
+
+@pytest.mark.asyncio
+async def test_generate_style_pack_combined_length_too_long() -> None:
+    model = ScriptedModel([[_VALID_DRAFT]])
+    repo = InMemoryRunRepository()
+    svc = CaseGenerationService(
+        settings=Settings(_env_file=None, max_text_chars=50),
+        model=model,
+        runs=repo,
+        style_packs=_style_packs(),
+    )
+    with pytest.raises(InputRejectedError) as ei:
+        await svc.generate(
+            GenerateCaseDraftsCommand(
+                text="登录",
+                file_name=None,
+                file_bytes=None,
+                style_pack_id=BUILTIN_PAYMENT_ID,
+            )
+        )
+    assert ei.value.code == "INPUT_TOO_LONG"
+    assert "已计入风格包范文" in ei.value.message
+    assert "50" in ei.value.message
+    assert model.calls == 0
+    assert repo.store == {}

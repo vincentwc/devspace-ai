@@ -26,6 +26,9 @@
   <label for="domain_hint">领域提示</label>
   <input id="domain_hint" type="text" name="domain_hint" value="{{ domain_hint or '' }}" />
 
+  <label for="style_pack_id">风格包 id</label>
+  <input id="style_pack_id" type="text" name="style_pack_id" value="{{ style_pack_id or '' }}" placeholder="可选 UUID" />
+
   <button type="submit">生成用例</button>
 </form>
 {% endblock %}
