@@ -22,6 +22,7 @@ def db_url() -> str:
 def client(db_url: str) -> TestClient:
     engine = create_engine(db_url)
     with engine.begin() as conn:
+        conn.execute(text("DROP TABLE IF EXISTS style_packs CASCADE"))
         conn.execute(text("DROP TABLE IF EXISTS generation_runs CASCADE"))
         conn.execute(text("DROP TABLE IF EXISTS alembic_version CASCADE"))
     cfg = Config("alembic.ini")
