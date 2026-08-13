@@ -54,6 +54,7 @@ def test_paste_text_returns_succeeded_with_drafts(client: TestClient) -> None:
     assert len(body["drafts"]) >= 1
     assert "trace" in body
     assert "issues" in body
+    assert body["model"] == "fake"
 
 
 def test_missing_both_fields_returns_400_invalid_input(client: TestClient) -> None:

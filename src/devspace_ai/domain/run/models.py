@@ -62,6 +62,8 @@ class GenerationRun:
     # 便捷字段：取 issues[0].message，便于列表/摘要展示
     error: str | None = None
     style_pack: StylePack | None = None
+    # 本次实际调用的适配器/网关模型名；Fake 为 "fake"；旧记录可能为 None
+    model: str | None = None
 
     @classmethod
     def start(cls, input_text: str) -> GenerationRun:

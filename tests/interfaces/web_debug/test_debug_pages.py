@@ -70,6 +70,8 @@ def test_debug_get_form(client: TestClient) -> None:
     r = client.get("/debug/")
     assert r.status_code == 200
     assert "生成用例" in r.text
+    assert "当前模型：Fake" in r.text
+    assert "忽略风格包范文" in r.text
 
 
 def test_debug_generate_paste(client: TestClient) -> None:
@@ -156,3 +158,32 @@ def test_run_detail_shows_style_pack_name(client: TestClient) -> None:
     )
     assert r.status_code == 200
     assert "风格包：示例 · 支付接口（example.payment.api）" in r.text
+    assert "模型：fake" in r.text
+
+
+def test_generate_form_shows_real_model_name(db_url: str) -> None:
+    engine = create_engine(db_url)
+    with engine.begin() as conn:
+        conn.execute(text("DROP TABLE IF EXISTS style_packs CASCADE"))
+        conn.execute(text("DROP TABLE IF EXISTS generation_runs CASCADE"))
+        conn.execute(text("DROP TABLE IF EXISTS alembic_version CASCADE"))
+    cfg = Config("alembic.ini")
+    cfg.set_main_option("sqlalchemy.url", db_url)
+    command.upgrade(cfg, "head")
+
+    settings = Settings(
+        _env_file=None,
+        app_env="local",
+        database_url=db_url,
+        model_provider="openai_compatible",
+        model_api_key="sk-test",
+        model_base_url="https://example.com/v1",
+        model_name="deepseek-chat",
+        max_text_chars=1_000,
+    )
+    client = TestClient(create_app(settings=settings))
+    r = client.get("/debug/")
+    assert r.status_code == 200
+    assert "当前模型：deepseek-chat" in r.text
+    assert "会注入风格包" in r.text
+    assert "当前模型：Fake" not in r.text

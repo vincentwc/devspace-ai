@@ -86,6 +86,7 @@ def _serialize_payload(run: GenerationRun) -> dict[str, object]:
         "trace": {"steps": steps},
         "issues": [asdict(i) for i in run.issues],
         "error": run.error,
+        "model": run.model,
     }
     if run.style_pack is not None:
         payload["style_pack"] = _serialize_style_pack(run.style_pack)
@@ -131,6 +132,7 @@ def _deserialize_run(row: GenerationRunRow) -> GenerationRun:
         trace=RunTrace(steps=steps),
         error=payload.get("error"),
         style_pack=_deserialize_style_pack(raw_pack if isinstance(raw_pack, dict) else None),
+        model=payload.get("model") if isinstance(payload.get("model"), str) else None,
     )
 
 

@@ -16,3 +16,4 @@ class GenerateCaseDraftsResult:
     trace: RunTrace
     error: str | None
     style_pack: StylePack | None = None
+    model: str | None = None
