@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>{{ title }}</h1>
+<p class="meta">用表单维护范文，不必手写 JSON。保存时提交到 <code>/api/v1/style-packs</code>。</p>
+<div id="form-issues" hidden></div>
+
+<form id="style-pack-form" data-mode="{{ mode }}" data-pack-id="{{ pack_id }}">
+  <label for="name">名称</label>
+  <input id="name" name="name" type="text" value="{{ name }}" maxlength="80" required />
+
+  <label for="key">代号</label>
+  <input id="key" name="key" type="text" value="{{ key }}" maxlength="64" {% if key_readonly %}readonly{% endif %} {% if not key_readonly %}placeholder="小写字母、数字、点、连字符"{% endif %} />
+
+  <label for="description">说明</label>
+  <textarea id="description" name="description">{{ description }}</textarea>
+
+  <h2>范文需求</h2>
+  <div id="examples">
+    {% if not examples %}
+    <article class="example-block">
+      <div class="actions">
+        <strong>需求</strong>
+        <button type="button" class="small btn-danger" onclick="removeExample(this)">删除需求</button>
+      </div>
+      <label>备注</label>
+      <input data-f="label" type="text" maxlength="80" />
+      <label>需求文本</label>
+      <textarea data-f="requirement_text"></textarea>
+      <div class="drafts">
+        <article class="draft-block">
+          <div class="actions">
+            <strong>用例</strong>
+            <button type="button" class="small btn-danger" onclick="removeDraft(this)">删除用例</button>
+          </div>
+          <label>标题</label>
+          <input data-f="title" type="text" />
+          <label>优先级</label>
+          <select data-f="priority">
+            <option value="" selected>（空）</option>
+            <option value="P0">P0</option>
+            <option value="P1">P1</option>
+            <option value="P2">P2</option>
+            <option value="P3">P3</option>
+          </select>
+          <label>前置条件（一行一条）</label>
+          <textarea data-f="preconditions"></textarea>
+          <label>标签（逗号分隔）</label>
+          <input data-f="tags" type="text" />
+          <label>步骤</label>
+          <table class="steps-table">
+            <thead>
+              <tr><th>操作</th><th>预期</th><th>测试数据</th><th></th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><input data-f="action" type="text" /></td>
+                <td><input data-f="expected" type="text" /></td>
+                <td><input data-f="test_data" type="text" /></td>
+                <td><button type="button" class="small" onclick="removeStep(this)">删除步骤</button></td>
+              </tr>
+            </tbody>
+          </table>
+          <button type="button" class="small" onclick="addStep(this)">添加步骤</button>
+          <details>
+            <summary>rationale</summary>
+            <textarea data-f="rationale"></textarea>
+          </details>
+        </article>
+      </div>
+      <button type="button" class="small" onclick="addDraft(this)">添加用例</button>
+    </article>
+    {% endif %}
+    {% for ex in examples %}
+    <article class="example-block">
+      <div class="actions">
+        <strong>需求 {{ loop.index }}</strong>
+        <button type="button" class="small btn-danger" onclick="removeExample(this)">删除需求</button>
+      </div>
+      <label>备注</label>
+      <input data-f="label" type="text" value="{{ ex.label or '' }}" maxlength="80" />
+      <label>需求文本</label>
+      <textarea data-f="requirement_text">{{ ex.requirement_text }}</textarea>
+      <div class="drafts">
+        {% for draft in ex.drafts %}
+        <article class="draft-block">
+          <div class="actions">
+            <strong>用例</strong>
+            <button type="button" class="small btn-danger" onclick="removeDraft(this)">删除用例</button>
+          </div>
+          <label>标题</label>
+          <input data-f="title" type="text" value="{{ draft.title }}" />
+          <label>优先级</label>
+          <select data-f="priority">
+            <option value="" {% if not draft.priority %}selected{% endif %}>（空）</option>
+            {% for p in ["P0", "P1", "P2", "P3"] %}
+            <option value="{{ p }}" {% if draft.priority == p %}selected{% endif %}>{{ p }}</option>
+            {% endfor %}
+          </select>
+          <label>前置条件（一行一条）</label>
+          <textarea data-f="preconditions">{{ draft.preconditions | join("\n") }}</textarea>
+          <label>标签（逗号分隔）</label>
+          <input data-f="tags" type="text" value="{{ draft.tags | join(", ") }}" />
+          <label>步骤</label>
+          <table class="steps-table">
+            <thead>
+              <tr><th>操作</th><th>预期</th><th>测试数据</th><th></th></tr>
+            </thead>
+            <tbody>
+              {% for step in draft.steps %}
+              <tr>
+                <td><input data-f="action" type="text" value="{{ step.action }}" /></td>
+                <td><input data-f="expected" type="text" value="{{ step.expected }}" /></td>
+                <td><input data-f="test_data" type="text" value="{{ step.test_data or '' }}" /></td>
+                <td><button type="button" class="small" onclick="removeStep(this)">删除步骤</button></td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+          <button type="button" class="small" onclick="addStep(this)">添加步骤</button>
+          <details>
+            <summary>rationale</summary>
+            <textarea data-f="rationale">{{ draft.rationale or '' }}</textarea>
+          </details>
+        </article>
+        {% endfor %}
+      </div>
+      <button type="button" class="small" onclick="addDraft(this)">添加用例</button>
+    </article>
+    {% endfor %}
+  </div>
+  <button type="button" class="small" onclick="addExample()">添加需求</button>
+  <div>
+    <button type="submit">保存</button>
+    <a class="btn btn-secondary" href="/debug/style-packs">取消</a>
+  </div>
+</form>
+<script src="/debug/static/style_pack_form.js" defer></script>
+{% endblock %}
