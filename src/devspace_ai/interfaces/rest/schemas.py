@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 from datetime import datetime
+from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict
 
 from devspace_ai.application.dto.results import GenerateCaseDraftsResult
-from devspace_ai.domain.case_draft.models import CaseDraft
+from devspace_ai.domain.case_draft.models import CaseDraft, TestStep
 from devspace_ai.domain.run.models import GenerationRun, Issue, RunTrace, StepRecord
+from devspace_ai.domain.style_pack.models import StyleExample, StylePack
 
 
 class IssueDTO(BaseModel):
@@ -128,4 +130,126 @@ def run_to_dto(run: GenerationRun) -> GenerationRunDTO:
         issues=[issue_to_dto(i) for i in run.issues],
         trace=trace_to_dto(run.trace),
         error=run.error,
+    )
+
+
+class StyleExampleDTO(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    label: str | None = None
+    requirement_text: str
+    drafts: list[CaseDraftDTO]
+
+
+class StylePackListItemDTO(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    key: str
+    name: str
+    description: str | None = None
+    requirement_count: int
+    draft_count: int
+    updated_at: datetime | None = None
+    builtin: bool
+
+
+class StylePackDetailDTO(StylePackListItemDTO):
+    examples: list[StyleExampleDTO]
+
+
+class StylePackCreateBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    key: str
+    name: str
+    description: str | None = None
+    examples: list[StyleExampleDTO]
+
+
+class StylePackUpdateBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    description: str | None = None
+    examples: list[StyleExampleDTO]
+
+
+def _dto_to_draft(dto: CaseDraftDTO) -> CaseDraft:
+    return CaseDraft(
+        title=dto.title,
+        preconditions=list(dto.preconditions),
+        steps=[
+            TestStep(action=s.action, expected=s.expected, test_data=s.test_data) for s in dto.steps
+        ],
+        priority=dto.priority,
+        tags=list(dto.tags),
+        rationale=dto.rationale,
+    )
+
+
+def _dto_to_example(dto: StyleExampleDTO) -> StyleExample:
+    return StyleExample(
+        label=dto.label,
+        requirement_text=dto.requirement_text,
+        drafts=[_dto_to_draft(d) for d in dto.drafts],
+    )
+
+
+def pack_to_list_dto(pack: StylePack) -> StylePackListItemDTO:
+    return StylePackListItemDTO(
+        id=pack.id,
+        key=pack.key,
+        name=pack.name,
+        description=pack.description,
+        requirement_count=len(pack.examples),
+        draft_count=pack.draft_count(),
+        updated_at=pack.updated_at,
+        builtin=pack.builtin,
+    )
+
+
+def pack_to_detail_dto(pack: StylePack) -> StylePackDetailDTO:
+    return StylePackDetailDTO(
+        id=pack.id,
+        key=pack.key,
+        name=pack.name,
+        description=pack.description,
+        requirement_count=len(pack.examples),
+        draft_count=pack.draft_count(),
+        updated_at=pack.updated_at,
+        builtin=pack.builtin,
+        examples=[
+            StyleExampleDTO(
+                label=ex.label,
+                requirement_text=ex.requirement_text,
+                drafts=[draft_to_dto(d) for d in ex.drafts],
+            )
+            for ex in pack.examples
+        ],
+    )
+
+
+def body_to_style_pack(
+    body: StylePackCreateBody | StylePackUpdateBody,
+    *,
+    pack_id: str | None = None,
+    key: str | None = None,
+) -> StylePack:
+    if isinstance(body, StylePackCreateBody):
+        return StylePack(
+            id=pack_id or str(uuid4()),
+            key=body.key,
+            name=body.name,
+            description=body.description,
+            examples=[_dto_to_example(ex) for ex in body.examples],
+            builtin=False,
+        )
+    return StylePack(
+        id=pack_id or "",
+        key=key or "",
+        name=body.name,
+        description=body.description,
+        examples=[_dto_to_example(ex) for ex in body.examples],
+        builtin=False,
     )
