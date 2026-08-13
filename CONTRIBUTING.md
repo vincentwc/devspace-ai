@@ -12,7 +12,12 @@
    ```
 
 4. 开 PR 到 `main`，填写模板中的 Summary / Test plan。
-5. 默认 **Squash merge**；合入后删除本地与远程功能分支，并 `git pull` 更新 `main`。
+5. 默认 **Squash merge**。仓库已开启 **合入后自动删除源分支**；本地再执行：
+   ```bash
+   git checkout main && git pull origin main
+   git branch -d <merged-branch>   # 若本地还在
+   git fetch --prune
+   ```
 
 细则见 [`.cursor/rules/git-pr-workflow.mdc`](.cursor/rules/git-pr-workflow.mdc) 与 [docs/engineering-checklist.md](docs/engineering-checklist.md)。
 
@@ -30,4 +35,4 @@
 
 ## Branch protection
 
-仓库若为 Private + GitHub Free，可能无法开启 Branch protection。升级 Pro 或改为 Public 后，请为 `main` 开启：禁止直推、必须 PR、CI `quality` 通过后再合并。
+`main` 已开启保护：禁止直推与 force push、必须经 PR、要求 CI `quality` 通过且分支与 base 同步；`enforce_admins` 已打开。审批数当前为 0（适合个人仓库），多人协作时可再提高到 1。

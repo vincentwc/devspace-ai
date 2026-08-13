@@ -129,7 +129,7 @@ make hooks   # 提交时自动 ruff，减少 CI format 失败
 
 更多约定见 [CONTRIBUTING.md](CONTRIBUTING.md)、[工程清单](docs/engineering-checklist.md)。
 
-> 说明：当前仓库为 **Private**，GitHub Free 无法开启 `main` 的 Branch protection。若升级 GitHub Pro 或改为 Public，建议开启：禁止直推 `main`、必须经 PR、CI `quality` 通过后再合并。
+> `main` 已开启 Branch protection（仓库为 Public）：禁止直推、必须经 PR、CI `quality` 通过且与 base 同步后方可合并；对管理员同样生效。
 
 ## 文档
 

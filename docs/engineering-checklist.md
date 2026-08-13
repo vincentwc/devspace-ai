@@ -18,10 +18,12 @@ v1 用例草稿生成的权威验收见：
 
 ## B. 合入后清理
 
+远程源分支在 PR 合入后由仓库设置自动删除。本地：
+
 ```bash
 git checkout main && git pull origin main
-git branch -d <merged-branch>
-git push origin --delete <merged-branch>   # 若远程仍在
+git branch -d <merged-branch>   # 若本地还在
+git fetch --prune
 ```
 
 ## C. 复盘模板（大需求结束后填一份）
