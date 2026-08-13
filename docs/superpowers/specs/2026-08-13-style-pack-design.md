@@ -46,6 +46,7 @@ v1 只把**当次需求**和可选的一句话 `domain_hint` 送给模型。不�
 3. 运行轨迹能看出用了哪个包；该次 Run 的 payload 保存当时范文快照，包日后改删不影响回放。
 4. `GET` 风格包列表/详情始终可用；生成可带 `style_pack_id`（供以后 TMS 接入）。
 5. 不选包时，v1 生成行为不变。
+6. 系统内置 2 个只读示例包：维护页当教材，生成下拉也可直接选，用来对比「套风格 vs 不套」。
 
 ### 2.4 非目标
 
@@ -78,11 +79,12 @@ v1 只把**当次需求**和可选的一句话 `domain_hint` 送给模型。不�
 | SP-014 | PostgreSQL：`style_packs` 表 + 范文 JSONB |
 | SP-015 | 当次需求文本 + **拼进提示词的范文字符**合计不超过 `max_text_chars`（默认 50k），超出拒绝 |
 | SP-016 | 显示名 `name` 允许重复；必填，trim 后 1～80 字。下拉与列表展示 `名称（代号）`。`description` 选填，最多 500 字 |
-| SP-017 | 选包生成时，Run 的 payload 快照 `id/key/name/examples`；未选包则省略该字段 |
+| SP-017 | 选包生成时，Run 的 payload 快照 `id/key/name/examples/builtin`；未选包则 `style_pack` 为 `null` |
 | SP-018 | 一组范文 = 1 条需求 + 1～3 条合格用例 |
 | SP-019 | 维护页全结构化表单（需求块 / 用例 / 步骤可增删），不手写 JSON；`rationale` 可选折叠 |
-| SP-020 | 全环境最多 50 个风格包；超出新建 → `PACK_LIMIT` |
+| SP-020 | 用户自建包最多 50 个（不含内置示例）；超出新建 → `PACK_LIMIT` |
 | SP-021 | 本轮不做导入/导出。生产默认不能写包；要改则临时 `ENABLE_DEBUG_UI=true` 或使用已有数据的库 |
+| SP-022 | 仓库内置 2 个示例包（不入库、只读）。列表/详情/生成下拉均包含；可「用此示例创建」复制成自建包。禁止改/删示例 |
 
 ## 4. 方案取舍
 
@@ -99,6 +101,9 @@ v1 只把**当次需求**和可选的一句话 `domain_hint` 送给模型。不�
 | 生成只记轨迹、不快照范文 | 实现省 | 排除：包改删后无法回放当时上下文 |
 | Run payload 快照当时范文 | 与 v1 存需求原文同类 | **采纳（SP-017）** |
 | 本轮做导入/导出 | 方便拷到生产 | 排除；生产维护见 SP-021 |
+| 示例只展示在维护页 | 纯教材 | 排除：用户希望生成时也能直接选示例对比 |
+| 示例写入数据库当普通包 | 实现省 | 排除：会被改乱或删光 |
+| 内置示例不入库、只读、生成可选 | 教材 + 可立刻试用 | **采纳（SP-022）** |
 
 曾考虑「先建空文件夹再贴范文」：已否决。
 
@@ -118,7 +123,7 @@ v1 只把**当次需求**和可选的一句话 `domain_hint` 送给模型。不�
 `key`：非空；仅小写英文字母、数字、点、连字符；长度 1～64。  
 `name`：必填；trim 后 1～80 字（按 Python `len` 计，含中文）。空格-only 视为空。
 
-全环境包个数 ≤ 50。
+用户自建包个数 ≤ 50（内置示例不计入、不占表）。
 
 ### 5.2 一组范文
 
@@ -137,6 +142,24 @@ v1 只把**当次需求**和可选的一句话 `domain_hint` 送给模型。不�
 - 编辑时删光范文再保存 → 拒绝，库中包不变
 - 无版本号、无软删除、无租户字段
 
+### 5.4 内置示例包（不入库）
+
+固定 2 个，定义在代码/fixture 中，启动即存在，不写 `style_packs` 表。
+
+| 显示名 | `key` | 稳定 `id`（UUID） |
+| --- | --- | --- |
+| 示例 · 支付接口 | `example.payment.api` | `00000000-0000-4000-8000-000000000001` |
+| 示例 · 营销活动页 | `example.marketing.web` | `00000000-0000-4000-8000-000000000002` |
+
+约束：
+
+- API 与领域对象多一个只读字段 `builtin: true`（自建包为 `false`）
+- `key` 以 `example.` 开头视为保留：用户 `POST` 使用保留 key → `INVALID_KEY`
+- `PUT` / `DELETE` 这两个 id → **400** `PACK_READONLY`（调试 UI 关闭时写路由本就不存在）
+- 内容须通过与自建包相同的不变量；作为教材，每个示例至少 **2 条需求**，其中至少 1 条需求下有 **2 条用例**；步骤须覆盖 `test_data` 为空与非空
+- 具体用例正文写在 fixture 里（中文），规格不抄全文；实现时用 domain 校验锁住结构
+- 改示例内容只能发版，不算「用户维护」
+
 ## 6. 页面
 
 均在 `/debug/`，门控与 v1 相同。页头增加「风格包」链接（`/debug/style-packs`），生成页与风格包页可互达。
@@ -145,12 +168,15 @@ v1 只把**当次需求**和可选的一句话 `domain_hint` 送给模型。不�
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| GET | `/debug/style-packs` | 列表：`名称（代号）`、需求条数、用例条数；新建 / 编辑 / 删除 |
-| GET | `/debug/style-packs/new` | 新建表单 |
+| GET | `/debug/style-packs` | 列表分两块：先「系统示例」（只读，按钮「查看」「用此示例创建」），再「我的风格包」（编辑 / 删除 / 新建） |
+| GET | `/debug/style-packs/new` | 新建表单（可带 query `from=` 内置 id，用于「用此示例创建」预填） |
+| GET | `/debug/style-packs/{id}` | 只读查看（内置与自建都可用） |
 | GET | `/debug/style-packs/{id}/edit` | 编辑表单（代号只读） |
 | GET | `/debug/` | 生成表单，含风格下拉 |
 
-维护页提交：浏览器 fetch `POST/PUT/DELETE /api/v1/style-packs`（仅调试 UI 开启时这些写方法才存在）。删除前 `confirm`。
+维护页提交：浏览器 fetch `POST/PUT/DELETE /api/v1/style-packs`（仅调试 UI 开启时这些写方法才存在）。删除前 `confirm`。内置示例无编辑/删除入口；访问 `/debug/style-packs/{内置id}/edit` 应引导去「用此示例创建」，不得当成可保存的编辑页。
+
+「用此示例创建」：打开新建表单并预填该示例的 `examples`（及说明），**名称**预填为 `{原名}（副本）`，**代号留空**由用户自填（不能再用 `example.*`）。保存走普通 `POST`，得到可改可删的自建包。不另做 copy API。
 
 ### 6.2 维护表单（结构化，不手写 JSON）
 
@@ -162,7 +188,7 @@ v1 只把**当次需求**和可选的一句话 `domain_hint` 送给模型。不�
 
 ### 6.3 生成页
 
-- 下拉「用例风格」：第一项为空（不套风格）；其余 `名称（代号）`，值为 `id`
+- 下拉「用例风格」：第一项为空（不套风格）；随后先列 2 个系统示例（展示 `名称（代号）`，与列表一致），再列自建包。值为 `id`（示例用上表稳定 UUID）
 - 输入错误回表单时，保留已选 `style_pack_id`（与 v1 保留 `domain_hint` 相同）
 - 不在生成页展开范文；`domain_hint` 保留
 
@@ -171,7 +197,8 @@ v1 只把**当次需求**和可选的一句话 `domain_hint` 送给模型。不�
 1. `ingest_requirement`：与 v1 相同
 2. `load_style_context`（仅当 `style_pack_id` 非空）：  
    - 非法 UUID / 无法解析 → 400 `INVALID_INPUT`，不创建 Run  
-   - 合法但包不存在 → 400 `PACK_NOT_FOUND`，不创建 Run、不调模型  
+   - 合法但既不是内置 id、库中也没有 → 400 `PACK_NOT_FOUND`，不创建 Run、不调模型
+   - 内置 id：从 fixture 加载，与库中包同一套后续逻辑  
    - 包存在但 JSON 无法还原或校验失败 → 400 `INVALID_EXAMPLE`（或同等输入错误），不调模型  
    - 成功：记下快照，写入 trace  
 3. 需求字符 + 范文块字符 > `max_text_chars` → 400 `INPUT_TOO_LONG`（message 含当前长度、上限、已计入风格包范文）
@@ -201,18 +228,18 @@ Fake 模型不读范文。单测断言 messages 含包名与范文需求原文�
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| GET | `/style-packs` | 列表，按 `updated_at` 倒序。每项：`id`、`key`、`name`、`description`、`requirement_count`、`draft_count`、`updated_at`。不含范文正文。某包 JSON 损坏时该项计数可为 0，**不**导致整表 500 |
-| GET | `/style-packs/{id}` | 详情，含 `examples`。不存在 → **404** `{issues:[{code:PACK_NOT_FOUND,message}]}` |
+| GET | `/style-packs` | 列表 = **内置示例（固定顺序）+ 自建包（`updated_at` 倒序）**。每项另含 `builtin: bool`。其余字段：`id`、`key`、`name`、`description`、`requirement_count`、`draft_count`、`updated_at`（内置可用固定占位时间或 fixture 常量）。不含范文正文。自建包 JSON 损坏时该项计数可为 0，**不**导致整表 500；内置示例损坏视为实现缺陷（测试应拦住） |
+| GET | `/style-packs/{id}` | 详情，含 `examples` 与 `builtin`。先查内置再查库。都不存在 → **404** `{issues:[{code:PACK_NOT_FOUND,message}]}` |
 
-列表不分页（有 SP-020 硬顶）。
+列表不分页（有 SP-020 硬顶）。空库时列表仍有 2 条内置示例。
 
 ### 8.2 写（仅 `debug_ui_enabled()` 为真时挂载）
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | POST | `/style-packs` | 创建。201 + 详情 body。body：`key`、`name`、`description?`、`examples`。`id` 服务端生成 |
-| PUT | `/style-packs/{id}` | 整包更新 `name`、`description`、`examples`。schema `extra=forbid`，**不含 `key`**。不存在 → 404 `PACK_NOT_FOUND` |
-| DELETE | `/style-packs/{id}` | 204 无 body。不存在 → 404 `PACK_NOT_FOUND` |
+| PUT | `/style-packs/{id}` | 整包更新 `name`、`description`、`examples`。schema `extra=forbid`，**不含 `key`**。内置 id → 400 `PACK_READONLY`。不存在 → 404 `PACK_NOT_FOUND` |
+| DELETE | `/style-packs/{id}` | 204 无 body。内置 id → 400 `PACK_READONLY`。不存在 → 404 `PACK_NOT_FOUND` |
 
 调试 UI 关闭时：写方法未挂载，表现为框架 404（与其它不存在路由相同），不另造错误码。
 
@@ -223,9 +250,10 @@ Fake 模型不读范文。单测断言 messages 含包名与范文需求原文�
 | `EMPTY_PACK` | 范文组数为 0 |
 | `INVALID_EXAMPLE` | 需求空、每组草稿数不为 1～3、或 `CaseDraft` 校验失败 |
 | `INVALID_NAME` | 名称为空或超过 80 字 |
-| `INVALID_KEY` | `key` 格式不合法 |
-| `DUPLICATE_KEY` | `key` 已存在 |
-| `PACK_LIMIT` | 需求 >5、单组用例 >3、合计用例 >15、或全环境包数 ≥50。message 写明是哪一种上限与当前值 |
+| `INVALID_KEY` | `key` 格式不合法，或使用保留前缀 `example.` |
+| `DUPLICATE_KEY` | `key` 已与自建包冲突（内置 key 走 `INVALID_KEY`，见上） |
+| `PACK_LIMIT` | 需求 >5、单组用例 >3、合计用例 >15、或**自建包**数 ≥50。message 写明是哪一种上限与当前值 |
+| `PACK_READONLY` | 对内置示例做 PUT/DELETE |
 | `PACK_NOT_FOUND` | 读/写/生成时 id 不存在 |
 | `INVALID_INPUT` | 生成时 `style_pack_id` 非空但不是合法 UUID |
 | `INPUT_TOO_LONG` | 需求 + 范文块超 `max_text_chars` |
@@ -250,7 +278,8 @@ Fake 模型不读范文。单测断言 messages 含包名与范文需求原文�
 
 - `domain/style_pack`：包与范文不变量（含 5×3、15、50、name/key 规则）
 - `application`：Style Pack 维护服务；`CaseGenerationService` 依赖 `StylePackRepositoryPort`
-- `StylePackRepositoryPort`：`list` / `get` / `create` / `update` / `delete` / `count`
+- `StylePackRepositoryPort`：仅自建包 `list` / `get` / `create` / `update` / `delete` / `count`
+- 应用层读路径：内置目录 ∪ 仓储。`count` 只计自建包。生成加载同样先内置后库
 - `infrastructure`：PostgreSQL 适配；`case_generation` 提示词增加范文块
 - `interfaces`：读路由始终 include；写路由与 debug 页一同按 `debug_ui_enabled()` include
 
@@ -265,8 +294,8 @@ Fake 模型不读范文。单测断言 messages 含包名与范文需求原文�
 | domain | 空包、5/3/15 上限、50 包上限、`key`/`name` 规则、范文 `CaseDraft` 校验 |
 | application | 选包则 messages 含范文；不选则无范文块；缺包不调模型；超长拒绝；payload 含快照 |
 | persistence | 读写往返；删后 get 空；`key` 唯一；旧 Run 无 `style_pack` 键仍能反序列化 |
-| REST | GET 始终可测；写接口在 debug 关闭时 404；开启时可 CRUD；generate 带/不带 id |
-| 调试页 | 无范文保存失败；列表 `名称（代号）`；生成下拉可选；轨迹含包名；互链 |
+| REST | GET 空库仍返回 2 条 `builtin: true`；写接口在 debug 关闭时 404；对内置 PUT/DELETE → 400 `PACK_READONLY`；`POST` `example.*` → `INVALID_KEY`；generate 可带内置 id |
+| 调试页 | 列表分示例 / 我的包；示例可查看与「用此示例创建」；生成下拉含示例；轨迹含包名；互链 |
 | Fake / CI | 无密钥全绿；不要求 Fake 输出随包变化 |
 
 ## 12. 验收标准
@@ -276,7 +305,8 @@ Fake 模型不读范文。单测断言 messages 含包名与范文需求原文�
 3. 不选包时生成行为与 v1 一致（无 `load_style_context`，`style_pack` 为 null）。
 4. `GET /api/v1/style-packs` 在关闭调试 UI 时仍可用；此时 POST 风格包为 404。
 5. 删除后再用该 id 生成 → 400 `PACK_NOT_FOUND`，未调模型、未建 Run。
-6. 无真实密钥时 `make lint && make typecheck && make test` 全绿。
+6. 空库时生成下拉仍有 2 个系统示例；选示例生成后轨迹与快照含该示例；PUT/DELETE 示例失败。维护页可用「用此示例创建」得到可编辑副本。
+7. 无真实密钥时 `make lint && make typecheck && make test` 全绿。
 
 ## 13. 后续（不在本轮）
 
@@ -300,12 +330,13 @@ Fake 模型不读范文。单测断言 messages 含包名与范文需求原文�
 | 维护表单？ | 全结构化，不手写 JSON |
 | 显示名能否重名？ | 能；下拉 `名称（代号）` |
 | 生产如何改包？ | 本轮不导入导出；开调试 UI 或共用已有库 |
-| 环境内最多几个包？ | 50 |
+| 环境内最多几个包？ | 自建 50，不含内置示例 |
 | Run 是否快照范文？ | 是 |
+| 要不要系统示例？ | 要；2 个不入库、只读；生成下拉可选；可复制为自建包 |
 
 ## 15. Ambiguity Report
 
-> grill-me Spec 模式审阅（阈值 0.2）；决议已写回 SP-008、SP-012、SP-016～SP-021 及第 6～8 节。
+> grill-me Spec 模式审阅（阈值 0.2）；决议已写回 SP-008、SP-012、SP-016～SP-022。
 
 ```
 Ambiguity Report:
