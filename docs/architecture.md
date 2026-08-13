@@ -21,10 +21,22 @@
 ```text
 apps/api          # 组合根：create_app、健康检查、路由挂载
 interfaces/       # REST / 调试页适配
-application/      # 用例编排、端口
-domain/           # CaseDraft / Run 不变量
-infrastructure/   # 配置、日志、模型客户端、PostgreSQL 仓储
+application/      # 用例编排、style_pack 服务、端口
+domain/           # CaseDraft / Run / StylePack 不变量
+infrastructure/   # 配置、日志、模型客户端、PostgreSQL 仓储、内置示例
 ```
+
+### 风格包（Style Pack）
+
+风格包在生成时可选注入范文，提升不同业务/风格的草稿质量。**不是 RAG**：按用户选定的包全文拼进提示词，不做向量检索。
+
+| 路由 | 挂载策略 |
+| --- | --- |
+| `GET /api/v1/style-packs`（列表/详情） | **始终挂载** |
+| `POST/PUT/DELETE /api/v1/style-packs` | **仅 `ENABLE_DEBUG_UI` 开启时**；关闭时同路径 stub 返回 404 |
+| `/debug/style-packs`（维护页） | 随调试 UI 门控 |
+
+内置 2 个系统示例包（支付接口、营销活动页）不入库、只读；用户自建包存 PostgreSQL `style_packs` 表（范文 JSONB）。选包生成时 Run payload 快照当时范文；调试页维护走同一 `StylePackService` 与 JSON API。
 
 ## 健康与就绪
 
@@ -64,4 +76,4 @@ CI 使用 `postgres:16` service（宿主机 5432），注入 `DATABASE_URL`，�
 
 ## 明确不做（v1）
 
-写 TMS、鉴权、独立 SPA、SQLite。
+写 TMS、鉴权、独立 SPA、SQLite、向量检索 / RAG、风格包导入导出。
