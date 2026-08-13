@@ -82,6 +82,7 @@ docker compose up -d --build
 | `make lint` | ruff check + format --check |
 | `make typecheck` | mypy strict |
 | `make test` | pytest（需可达的 `DATABASE_URL`） |
+| `make hooks` | 安装 pre-commit（提交前自动 ruff） |
 | `make run` | Uvicorn 单 worker |
 | `make docker-up` | compose 构建并启动 api + db |
 | `make db-migrate` | Alembic upgrade head |
@@ -117,12 +118,24 @@ gh pr create --base main                   # 或在 GitHub 网页开 PR
 | `docs/` | 文档 / 注释 |
 | `chore/` | 工具链、流程、配置 |
 
-合入建议使用 **Squash merge**。Cursor Agent 也会遵循仓库规则 [`.cursor/rules/git-pr-workflow.mdc`](.cursor/rules/git-pr-workflow.mdc)。
+合入建议使用 **Squash merge**。合入后删除功能分支并 `git pull` 更新 `main`。  
+Cursor Agent 遵循 [`.cursor/rules/git-pr-workflow.mdc`](.cursor/rules/git-pr-workflow.mdc)。
 
-> 说明：当前仓库为 **Private**，GitHub Free 无法开启 `main` 的 Branch protection。若升级 GitHub Pro 或改为 Public，建议开启：禁止直推 `main`、必须经 PR、CI 通过后再合并。
+首次克隆后建议执行一次：
+
+```bash
+make hooks   # 提交时自动 ruff，减少 CI format 失败
+```
+
+更多约定见 [CONTRIBUTING.md](CONTRIBUTING.md)、[工程清单](docs/engineering-checklist.md)。
+
+> 说明：当前仓库为 **Private**，GitHub Free 无法开启 `main` 的 Branch protection。若升级 GitHub Pro 或改为 Public，建议开启：禁止直推 `main`、必须经 PR、CI `quality` 通过后再合并。
 
 ## 文档
 
+- [贡献指南](CONTRIBUTING.md)
+- [工程清单（验收 / 复盘）](docs/engineering-checklist.md)
 - [架构说明](docs/architecture.md)
+- [PyCharm Debug](docs/debug-pycharm.md)
 - [设计规格](docs/superpowers/specs/2026-08-12-devspace-ai-case-generation-design.md)
 - [实现计划](docs/superpowers/plans/2026-08-12-case-draft-generation.md)
