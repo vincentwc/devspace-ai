@@ -1,4 +1,6 @@
+import json
 import os
+from uuid import uuid4
 
 import pytest
 from alembic.config import Config
@@ -8,6 +10,7 @@ from sqlalchemy import create_engine, text
 from alembic import command
 from devspace_ai.apps.api.main import create_app
 from devspace_ai.infrastructure.config.settings import Settings
+from devspace_ai.infrastructure.style_pack.builtins import BUILTIN_PAYMENT_ID
 
 
 @pytest.fixture()
@@ -22,6 +25,7 @@ def db_url() -> str:
 def client(db_url: str) -> TestClient:
     engine = create_engine(db_url)
     with engine.begin() as conn:
+        conn.execute(text("DROP TABLE IF EXISTS style_packs CASCADE"))
         conn.execute(text("DROP TABLE IF EXISTS generation_runs CASCADE"))
         conn.execute(text("DROP TABLE IF EXISTS alembic_version CASCADE"))
     cfg = Config("alembic.ini")
@@ -85,3 +89,77 @@ def test_get_run_by_id_after_generate(client: TestClient) -> None:
 
     missing = client.get("/api/v1/runs/does-not-exist")
     assert missing.status_code == 404
+
+
+def test_generate_with_builtin_style_pack_snapshots(client: TestClient) -> None:
+    response = client.post(
+        "/api/v1/case-drafts/generate",
+        data={"text": "登录", "style_pack_id": BUILTIN_PAYMENT_ID},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["style_pack"]["builtin"] is True
+    assert body["style_pack"]["id"] == BUILTIN_PAYMENT_ID
+    assert any(s["step_name"] == "load_style_context" for s in body["trace"]["steps"])
+
+    replayed = client.get(f"/api/v1/runs/{body['run_id']}")
+    assert replayed.status_code == 200
+    assert replayed.json()["style_pack"]["id"] == BUILTIN_PAYMENT_ID
+    assert replayed.json()["style_pack"]["builtin"] is True
+
+
+def test_generate_without_style_pack_id_returns_null_snapshot(client: TestClient) -> None:
+    response = client.post(
+        "/api/v1/case-drafts/generate",
+        data={"text": "登录"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert "style_pack" in body
+    assert body["style_pack"] is None
+    assert all(s["step_name"] != "load_style_context" for s in body["trace"]["steps"])
+
+
+def test_generate_unknown_style_pack_returns_400(client: TestClient) -> None:
+    response = client.post(
+        "/api/v1/case-drafts/generate",
+        data={"text": "登录", "style_pack_id": "00000000-0000-4000-8000-000000000099"},
+    )
+    assert response.status_code == 400
+    assert response.json()["issues"][0]["code"] == "PACK_NOT_FOUND"
+
+
+def test_generate_invalid_style_pack_id_returns_400(client: TestClient) -> None:
+    response = client.post(
+        "/api/v1/case-drafts/generate",
+        data={"text": "登录", "style_pack_id": "abc"},
+    )
+    assert response.status_code == 400
+    assert response.json()["issues"][0]["code"] == "INVALID_INPUT"
+
+
+def test_generate_corrupt_style_pack_returns_invalid_example(
+    client: TestClient, db_url: str
+) -> None:
+    pack_id = str(uuid4())
+    engine = create_engine(db_url)
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO style_packs "
+                "(id, key, name, description, examples, created_at, updated_at) "
+                "VALUES (:id, :key, :name, NULL, CAST(:examples AS jsonb), now(), now())"
+            ),
+            {
+                "id": pack_id,
+                "key": "corrupt.pack",
+                "name": "损坏包",
+                "examples": json.dumps([{"drafts": []}]),
+            },
+        )
+    response = client.post(
+        "/api/v1/case-drafts/generate",
+        data={"text": "登录", "style_pack_id": pack_id},
+    )
+    assert response.status_code == 400
+    assert response.json()["issues"][0]["code"] == "INVALID_EXAMPLE"

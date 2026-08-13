@@ -11,6 +11,7 @@ from typing import Any
 import httpx
 
 from devspace_ai.application.port.outbound.model_port import ModelGenerationResult
+from devspace_ai.domain.style_pack.models import StylePack
 from devspace_ai.infrastructure.config.settings import Settings
 from devspace_ai.infrastructure.prompt.case_generation import build_messages
 
@@ -33,6 +34,7 @@ class OpenAICompatibleModelAdapter:
         language: str,
         domain_hint: str | None,
         repair_issues: list[str] | None,
+        style_pack: StylePack | None = None,
     ) -> ModelGenerationResult:
         if not self.settings.model_base_url:
             raise RuntimeError("使用 openai_compatible 时必须配置 MODEL_BASE_URL")
@@ -42,6 +44,7 @@ class OpenAICompatibleModelAdapter:
             language=language,
             domain_hint=domain_hint,
             repair_issues=repair_issues,
+            style_pack=style_pack,
         )
         url = self.settings.model_base_url.rstrip("/") + "/chat/completions"
         headers = {

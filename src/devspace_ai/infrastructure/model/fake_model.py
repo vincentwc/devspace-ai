@@ -4,6 +4,7 @@
 """
 
 from devspace_ai.application.port.outbound.model_port import ModelGenerationResult
+from devspace_ai.domain.style_pack.models import StylePack
 
 
 class FakeModelAdapter:
@@ -15,7 +16,9 @@ class FakeModelAdapter:
         language: str,
         domain_hint: str | None,
         repair_issues: list[str] | None,
+        style_pack: StylePack | None = None,
     ) -> ModelGenerationResult:
+        _ = style_pack  # 假模型忽略范文，始终返回固定草稿
         drafts: list[dict[str, object]] = [
             {
                 "title": "主路径验证",

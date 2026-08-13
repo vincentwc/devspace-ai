@@ -67,11 +67,34 @@
     }
     .row { display: flex; gap: 1rem; flex-wrap: wrap; }
     .row > * { flex: 1; min-width: 140px; }
+    header a + a { margin-left: 1rem; }
+    .actions { display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: center; margin: 0.5rem 0; }
+    .actions a, .actions button, a.btn { margin-top: 0; }
+    a.btn { display: inline-block; text-decoration: none; }
+    .btn-secondary { background: #5c574e; }
+    .btn-danger { background: var(--warn); }
+    button.small, .btn.small {
+      margin-top: 0.4rem;
+      padding: 0.35rem 0.65rem;
+      font-size: 0.85rem;
+    }
+    .example-block, .draft-block {
+      border: 1px solid var(--line);
+      background: var(--card);
+      padding: 0.85rem 1rem;
+      margin: 0.6rem 0;
+    }
+    .steps-table { width: 100%; border-collapse: collapse; }
+    .steps-table th, .steps-table td { padding: 0.25rem; text-align: left; }
+    .steps-table input { width: 100%; }
+    details { margin-top: 0.5rem; }
+    .pack-item { margin-bottom: 0.75rem; }
   </style>
 </head>
 <body>
   <header>
     <a href="/debug/">调试页</a>
+    <a href="/debug/style-packs">风格包</a>
   </header>
   <main>
     {% block content %}{% endblock %}

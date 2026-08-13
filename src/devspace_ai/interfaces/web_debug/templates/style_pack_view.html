@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block content %}
+{% if error or not pack %}
+<h1>风格包不存在</h1>
+<p class="error">{{ error or "风格包不存在" }}</p>
+<p><a href="/debug/style-packs">返回列表</a></p>
+{% else %}
+<h1>{{ pack.name }}</h1>
+<p class="meta">代号：{{ pack.key }}{% if pack.builtin %} · 系统示例{% endif %}</p>
+{% if pack.description %}<p>{{ pack.description }}</p>{% endif %}
+<div class="actions">
+  <a href="/debug/style-packs">返回列表</a>
+  {% if pack.builtin %}
+  <a href="/debug/style-packs/new?from={{ pack.id }}">用此示例创建</a>
+  {% else %}
+  <a href="/debug/style-packs/{{ pack.id }}/edit">编辑</a>
+  {% endif %}
+</div>
+
+{% for ex in pack.examples %}
+<section class="example-block">
+  <h2>{{ ex.label or ("需求 " ~ loop.index) }}</h2>
+  <p>{{ ex.requirement_text }}</p>
+  {% for draft in ex.drafts %}
+  <section class="draft">
+    <strong>{{ draft.title }}</strong>
+    {% if draft.priority %}<span class="meta"> · {{ draft.priority }}</span>{% endif %}
+    {% if draft.tags %}<span class="meta"> · {{ draft.tags | join(", ") }}</span>{% endif %}
+    {% if draft.preconditions %}
+    <p class="meta">前置：{{ draft.preconditions | join("；") }}</p>
+    {% endif %}
+    <ol>
+      {% for step in draft.steps %}
+      <li>
+        <div>动作：{{ step.action }}</div>
+        <div>期望：{{ step.expected }}</div>
+        <div>test_data：{{ step.test_data if step.test_data is not none else "—" }}</div>
+      </li>
+      {% endfor %}
+    </ol>
+    {% if draft.rationale %}
+    <details>
+      <summary>rationale</summary>
+      <p class="meta">{{ draft.rationale }}</p>
+    </details>
+    {% endif %}
+  </section>
+  {% endfor %}
+</section>
+{% endfor %}
+{% endif %}
+{% endblock %}

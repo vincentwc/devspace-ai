@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 from devspace_ai.domain.case_draft.models import CaseDraft
 from devspace_ai.domain.run.models import Issue, RunStatus, RunTrace
+from devspace_ai.domain.style_pack.models import StylePack
 
 
 @dataclass
@@ -14,3 +15,4 @@ class GenerateCaseDraftsResult:
     issues: list[Issue]
     trace: RunTrace
     error: str | None
+    style_pack: StylePack | None = None

@@ -26,6 +26,14 @@
   <label for="domain_hint">领域提示</label>
   <input id="domain_hint" type="text" name="domain_hint" value="{{ domain_hint or '' }}" />
 
+  <label for="style_pack_id">用例风格</label>
+  <select id="style_pack_id" name="style_pack_id">
+    <option value="">（不套风格）</option>
+    {% for pack in style_packs|default([]) %}
+    <option value="{{ pack.id }}" {% if style_pack_id == pack.id %}selected{% endif %}>{{ pack.name }}（{{ pack.key }}）</option>
+    {% endfor %}
+  </select>
+
   <button type="submit">生成用例</button>
 </form>
 {% endblock %}
