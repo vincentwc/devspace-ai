@@ -20,11 +20,11 @@ alwaysApply: true
    ```
    （改动极小时至少跑相关 pytest；业务代码被 Debug 改过则必须再跑测试。）
 3. `git push -u origin HEAD`，以 `main` 为 base 开 PR（用仓库 PR 模板）。
-4. 合入后立刻：
+4. 合入后立刻（远程源分支由 GitHub「delete_branch_on_merge」自动删）：
    ```bash
    git checkout main && git pull origin main
-   git branch -d <type>/<short-name>          # 本地
-   git push origin --delete <type>/<short-name>  # 远程（若仍存在）
+   git branch -d <type>/<short-name>   # 本地
+   git fetch --prune
    ```
 5. Agent 被要求「提交 / 开 PR」时：若当前在 `main`，**先建分支再提交**；**绝不** `git push origin main`。
 

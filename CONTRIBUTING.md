@@ -12,7 +12,12 @@
    ```
 
 4. 开 PR 到 `main`，填写模板中的 Summary / Test plan。
-5. 默认 **Squash merge**；合入后删除本地与远程功能分支，并 `git pull` 更新 `main`。
+5. 默认 **Squash merge**。仓库已开启 **合入后自动删除源分支**；本地再执行：
+   ```bash
+   git checkout main && git pull origin main
+   git branch -d <merged-branch>   # 若本地还在
+   git fetch --prune
+   ```
 
 细则见 [`.cursor/rules/git-pr-workflow.mdc`](.cursor/rules/git-pr-workflow.mdc) 与 [docs/engineering-checklist.md](docs/engineering-checklist.md)。
 
