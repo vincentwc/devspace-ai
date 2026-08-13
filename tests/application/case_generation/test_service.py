@@ -59,7 +59,9 @@ class ScriptedModel:
         language: str,
         domain_hint: str | None,
         repair_issues: list[str] | None,
+        style_pack: object | None = None,
     ) -> ModelGenerationResult:
+        _ = style_pack
         self.calls += 1
         if repair_issues is not None:
             self.repair_calls += 1

@@ -7,6 +7,8 @@
 from dataclasses import dataclass
 from typing import Protocol
 
+from devspace_ai.domain.style_pack.models import StylePack
+
 
 @dataclass
 class ModelGenerationResult:
@@ -26,4 +28,5 @@ class ModelPort(Protocol):
         language: str,
         domain_hint: str | None,
         repair_issues: list[str] | None,
+        style_pack: StylePack | None,
     ) -> ModelGenerationResult: ...

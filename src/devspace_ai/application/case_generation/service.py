@@ -141,6 +141,7 @@ class CaseGenerationService:
             language=language,
             domain_hint=domain_hint,
             repair_issues=None,
+            style_pack=None,
         )
         drafts, issues = self._validate_raw(raw.raw_drafts)
         run.trace.steps.append(
@@ -163,6 +164,7 @@ class CaseGenerationService:
                 language=language,
                 domain_hint=domain_hint,
                 repair_issues=[i.message for i in issues],
+                style_pack=None,
             )
             drafts, issues = self._validate_raw(raw.raw_drafts)
             run.trace.steps.append(
