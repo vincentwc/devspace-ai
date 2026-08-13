@@ -30,4 +30,4 @@
 
 ## Branch protection
 
-仓库若为 Private + GitHub Free，可能无法开启 Branch protection。升级 Pro 或改为 Public 后，请为 `main` 开启：禁止直推、必须 PR、CI `quality` 通过后再合并。
+`main` 已开启保护：禁止直推与 force push、必须经 PR、要求 CI `quality` 通过且分支与 base 同步；`enforce_admins` 已打开。审批数当前为 0（适合个人仓库），多人协作时可再提高到 1。
