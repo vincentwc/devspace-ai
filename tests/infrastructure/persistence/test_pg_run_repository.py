@@ -82,3 +82,14 @@ def test_old_payload_without_style_pack_key_deserializes(repo, db_url):
     loaded = repo.get(run_id)
     assert loaded is not None
     assert loaded.style_pack is None
+    assert loaded.model is None
+
+
+def test_save_and_get_model(repo):
+    run = GenerationRun.start("req")
+    run.model = "deepseek-chat"
+    run.finish(RunStatus.SUCCEEDED, [], [])
+    repo.save(run)
+    loaded = repo.get(run.run_id)
+    assert loaded is not None
+    assert loaded.model == "deepseek-chat"

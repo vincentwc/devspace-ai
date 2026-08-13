@@ -2,6 +2,9 @@
 {% block content %}
 <h1>Run {{ run.run_id }}</h1>
 <p class="meta">状态：{{ run.status }} · <a href="/debug/runs/{{ run.run_id }}">回放链接</a> · <a href="/debug/">再生成</a></p>
+{% if run.model %}
+<p class="meta">模型：{{ run.model }}{% if run.model == "fake" %}（忽略风格包范文）{% endif %}</p>
+{% endif %}
 {% if run.style_pack %}
 <p class="meta">风格包：{{ run.style_pack.name }}（{{ run.style_pack.key }}）</p>
 {% endif %}

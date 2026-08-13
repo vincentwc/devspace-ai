@@ -52,3 +52,12 @@ class Settings(BaseSettings):
         if self.enable_debug_ui is not None:
             return self.enable_debug_ui
         return self.app_env in {"local", "test"}
+
+    def uses_fake_model(self) -> bool:
+        """与 factory 同一规则：显式 fake 或没有 API Key 时走 Fake。"""
+        return self.model_provider == "fake" or not self.model_api_key
+
+    def effective_model_label(self) -> str:
+        if self.uses_fake_model():
+            return "fake"
+        return self.model_name

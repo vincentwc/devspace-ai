@@ -186,6 +186,7 @@ class CaseGenerationService:
             run.trace,
             run.error,
             run.style_pack,
+            run.model,
         )
 
     async def _generate_and_validate(
@@ -207,6 +208,7 @@ class CaseGenerationService:
             repair_issues=None,
             style_pack=style_pack,
         )
+        run.model = raw.model
         drafts, issues = self._validate_raw(raw.raw_drafts)
         run.trace.steps.append(
             StepRecord(
@@ -230,6 +232,7 @@ class CaseGenerationService:
                 repair_issues=[i.message for i in issues],
                 style_pack=style_pack,
             )
+            run.model = raw.model
             drafts, issues = self._validate_raw(raw.raw_drafts)
             run.trace.steps.append(
                 StepRecord(

@@ -24,3 +24,27 @@ def test_empty_env_strings_become_none(monkeypatch: MonkeyPatch) -> None:
     assert s.model_provider is None
     assert s.model_base_url is None
     assert s.debug_ui_enabled() is True  # app_env default local
+
+
+def test_uses_fake_model_without_key() -> None:
+    s = Settings(_env_file=None, model_api_key=None, model_provider=None)
+    assert s.uses_fake_model() is True
+    assert s.effective_model_label() == "fake"
+
+
+def test_uses_real_model_when_key_present() -> None:
+    s = Settings(
+        _env_file=None,
+        model_api_key="sk-test",
+        model_base_url="https://example.com/v1",
+        model_provider="openai_compatible",
+        model_name="deepseek-chat",
+    )
+    assert s.uses_fake_model() is False
+    assert s.effective_model_label() == "deepseek-chat"
+
+
+def test_explicit_fake_provider_wins_over_key() -> None:
+    s = Settings(_env_file=None, model_api_key="sk-test", model_provider="fake")
+    assert s.uses_fake_model() is True
+    assert s.effective_model_label() == "fake"

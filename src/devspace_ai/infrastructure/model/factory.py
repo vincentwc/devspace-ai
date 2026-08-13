@@ -9,8 +9,7 @@ from devspace_ai.infrastructure.model.fake_model import FakeModelAdapter
 
 
 def build_model_adapter(settings: Settings) -> ModelPort:
-    provider = settings.model_provider
-    if provider == "fake" or not settings.model_api_key:
+    if settings.uses_fake_model():
         return FakeModelAdapter()
     from devspace_ai.infrastructure.model.openai_compatible import OpenAICompatibleModelAdapter
 

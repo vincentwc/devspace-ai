@@ -1,6 +1,11 @@
 {% extends "base.html" %}
 {% block content %}
 <h1>生成用例</h1>
+{% if uses_fake_model %}
+<p class="meta">当前模型：Fake（忽略风格包范文）。要看风格差异请配置真实模型密钥后重启。</p>
+{% else %}
+<p class="meta">当前模型：{{ model_label }}（会注入风格包）</p>
+{% endif %}
 <p class="meta">粘贴需求或上传 txt/md，调用与 API 相同的 CaseGenerationService。</p>
 {% if error %}
 <p class="error">{{ error }}</p>

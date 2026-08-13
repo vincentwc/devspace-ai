@@ -18,6 +18,7 @@ from devspace_ai.application.case_generation.service import CaseGenerationServic
 from devspace_ai.application.dto.commands import GenerateCaseDraftsCommand
 from devspace_ai.application.style_pack.errors import PackNotFoundError
 from devspace_ai.application.style_pack.service import StylePackService
+from devspace_ai.infrastructure.config.settings import Settings
 from devspace_ai.interfaces.rest.schemas import GenerationRunDTO, result_to_dto, run_to_dto
 
 TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
@@ -35,6 +36,10 @@ def _style_pack_service(request: Request) -> StylePackService:
     return cast(StylePackService, request.app.state.style_pack_service)
 
 
+def _settings(request: Request) -> Settings:
+    return cast(Settings, request.app.state.settings)
+
+
 def _run_context(dto: GenerationRunDTO) -> dict[str, Any]:
     """模板既渲染结构化字段，也给一份完整 JSON 便于复制。"""
     payload = dto.model_dump(mode="json")
@@ -45,10 +50,13 @@ def _run_context(dto: GenerationRunDTO) -> dict[str, Any]:
 
 
 def _generate_page_vars(request: Request, **extra: Any) -> dict[str, Any]:
+    settings = _settings(request)
     ctx: dict[str, Any] = {
         "title": "调试生成",
         "error": None,
         "style_packs": _style_pack_service(request).list_all(),
+        "uses_fake_model": settings.uses_fake_model(),
+        "model_label": settings.effective_model_label(),
     }
     ctx.update(extra)
     return ctx

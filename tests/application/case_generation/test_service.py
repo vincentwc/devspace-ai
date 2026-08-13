@@ -95,7 +95,10 @@ async def test_happy_path_succeeded() -> None:
     )
     assert result.status == RunStatus.SUCCEEDED
     assert len(result.drafts) >= 2
-    assert repo.get(result.run_id) is not None
+    assert result.model == "fake"
+    stored = repo.get(result.run_id)
+    assert stored is not None
+    assert stored.model == "fake"
 
 
 @pytest.mark.asyncio
@@ -299,6 +302,7 @@ async def test_generate_with_builtin_style_pack_loads_context() -> None:
         )
     )
     assert model.style_pack is not None
+    assert result.model == "scripted"
     assert any(s.step_name == "load_style_context" for s in result.trace.steps)
     step = next(s for s in result.trace.steps if s.step_name == "load_style_context")
     assert result.style_pack is not None
