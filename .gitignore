@@ -22,6 +22,7 @@ build/
 !.idea/runConfigurations/
 .idea/runConfigurations/*
 !.idea/runConfigurations/*.xml
+.idea/runConfigurations/_template__*.xml
 .vscode/
 .DS_Store
 
