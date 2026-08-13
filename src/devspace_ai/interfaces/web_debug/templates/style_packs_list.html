@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>风格包</h1>
+<p class="meta">系统示例只读；可复制为自建包后编辑。维护走同一套 REST。</p>
+
+<h2>系统示例</h2>
+{% for pack in builtins %}
+<section class="draft pack-item">
+  <strong>{{ pack.name }}</strong>
+  <span class="meta">（{{ pack.key }}）</span>
+  {% if pack.description %}<p class="meta">{{ pack.description }}</p>{% endif %}
+  <p class="meta">需求 {{ pack.examples | length }} 组 · 用例 {{ pack.draft_count() }} 条</p>
+  <div class="actions">
+    <a href="/debug/style-packs/{{ pack.id }}">查看</a>
+    <a href="/debug/style-packs/new?from={{ pack.id }}">用此示例创建</a>
+  </div>
+</section>
+{% endfor %}
+
+<h2>我的风格包</h2>
+<div class="actions">
+  <a class="btn small" href="/debug/style-packs/new">新建</a>
+</div>
+{% if not user_packs %}
+<p class="meta">还没有自建风格包。</p>
+{% endif %}
+{% for pack in user_packs %}
+<section class="draft pack-item">
+  <strong>{{ pack.name }}</strong>
+  <span class="meta">（{{ pack.key }}）</span>
+  {% if pack.description %}<p class="meta">{{ pack.description }}</p>{% endif %}
+  <p class="meta">需求 {{ pack.examples | length }} 组 · 用例 {{ pack.draft_count() }} 条</p>
+  <div class="actions">
+    <a href="/debug/style-packs/{{ pack.id }}">查看</a>
+    <a href="/debug/style-packs/{{ pack.id }}/edit">编辑</a>
+    <button type="button" class="small btn-danger" onclick="deletePack('{{ pack.id }}')">删除</button>
+  </div>
+</section>
+{% endfor %}
+
+<script>
+async function deletePack(id) {
+  if (!confirm("确定删除此风格包？")) return;
+  const res = await fetch("/api/v1/style-packs/" + id, { method: "DELETE" });
+  if (res.ok || res.status === 204) {
+    window.location.href = "/debug/style-packs";
+    return;
+  }
+  alert("删除失败");
+}
+</script>
+{% endblock %}

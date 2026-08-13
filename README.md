@@ -21,6 +21,7 @@ make run                  # http://127.0.0.1:8000
 | 入口 | 说明 |
 | --- | --- |
 | 调试页 | [http://127.0.0.1:8000/debug/](http://127.0.0.1:8000/debug/) |
+| 风格包维护 | [http://127.0.0.1:8000/debug/style-packs](http://127.0.0.1:8000/debug/style-packs)（需 `ENABLE_DEBUG_UI` 开启） |
 | 健康检查 | `GET /health` |
 | 就绪检查 | `GET /ready`（需 PostgreSQL 可达） |
 | OpenAPI | `/docs`、`/api/v1/...` |
@@ -73,6 +74,20 @@ docker compose up -d --build
 - `ENABLE_DEBUG_UI` 为空：按 `APP_ENV` 推断——`local` / `test` 开启，`prod` 关闭
 - 显式 `true` / `false` 可覆盖推断
 - 关闭时访问 `/debug/` 返回 404
+
+## 用例风格包（Style Pack）
+
+风格包是带范文的「写法教材」：生成时可选一个包，模型按包内合格用例的结构与措辞写草稿；**不选则与 v1 行为完全一致**。这不是 RAG——不做向量检索或按相似度召回，只把用户选定的包全文注入提示词。
+
+| 能力 | 说明 |
+| --- | --- |
+| 生成可选风格 | 调试页与 `POST /api/v1/case-drafts/generate` 均支持可选 `style_pack_id`；缺包返回 400，不创建 Run |
+| 系统示例 | 内置 2 个只读示例包（支付接口、营销活动页），列表/详情/生成下拉均可见；可「用此示例创建」复制为自建包 |
+| 读 API | `GET /api/v1/style-packs`、`GET /api/v1/style-packs/{id}` **始终可用**（供后续 TMS 接入） |
+| 写 API | `POST/PUT/DELETE /api/v1/style-packs` **仅在调试 UI 开启时**挂载；生产默认 404 |
+| 维护页 | `/debug/style-packs`：结构化表单新建/编辑/删除自建包（最多 50 个）；内置示例只读 |
+
+本地 Fake 模型忽略范文（与 `domain_hint` 一致）；对比风格差异需配置真实模型密钥。
 
 ## 常用命令
 

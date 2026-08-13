@@ -17,12 +17,28 @@ from sqlalchemy.engine import Engine
 
 from devspace_ai.application.case_generation.errors import InputRejectedError
 from devspace_ai.application.case_generation.service import CaseGenerationService
+from devspace_ai.application.style_pack.errors import IssuesRejectedError, PackNotFoundError
+from devspace_ai.application.style_pack.service import StylePackService
 from devspace_ai.infrastructure.config.logging import configure_logging
 from devspace_ai.infrastructure.config.settings import Settings
 from devspace_ai.infrastructure.model.factory import build_model_adapter
 from devspace_ai.infrastructure.persistence.pg_run_repository import PgRunRepository
-from devspace_ai.interfaces.rest.errors import input_rejected_handler
+from devspace_ai.infrastructure.persistence.pg_style_pack_repository import PgStylePackRepository
+from devspace_ai.interfaces.rest.errors import (
+    input_rejected_handler,
+    issues_rejected_handler,
+    pack_not_found_handler,
+)
 from devspace_ai.interfaces.rest.routes_case_drafts import router as case_drafts_router
+from devspace_ai.interfaces.rest.routes_style_packs import (
+    read_router as style_packs_read_router,
+)
+from devspace_ai.interfaces.rest.routes_style_packs import (
+    write_disabled_router as style_packs_write_disabled_router,
+)
+from devspace_ai.interfaces.rest.routes_style_packs import (
+    write_router as style_packs_write_router,
+)
 from devspace_ai.interfaces.web_debug.routes import router as debug_router
 
 
@@ -31,6 +47,7 @@ def create_app(
     *,
     engine_factory: Callable[[str], Engine] | None = None,
     case_generation_service: CaseGenerationService | None = None,
+    style_pack_service: StylePackService | None = None,
 ) -> FastAPI:
     """创建应用。测试可注入 `case_generation_service` / `engine_factory` 以避免真实外依赖。"""
     settings = settings or Settings()
@@ -39,17 +56,28 @@ def create_app(
     app = FastAPI(title="devspace-ai", version="0.1.0")
     app.state.settings = settings
 
+    if style_pack_service is None:
+        style_pack_service = StylePackService(PgStylePackRepository(settings.database_url))
+    app.state.style_pack_service = style_pack_service
+
     if case_generation_service is None:
         model = build_model_adapter(settings)
         runs = PgRunRepository(settings.database_url)
-        case_generation_service = CaseGenerationService(settings, model, runs)
+        case_generation_service = CaseGenerationService(settings, model, runs, style_pack_service)
     app.state.case_generation_service = case_generation_service
 
     app.add_exception_handler(InputRejectedError, input_rejected_handler)
+    app.add_exception_handler(PackNotFoundError, pack_not_found_handler)
+    app.add_exception_handler(IssuesRejectedError, issues_rejected_handler)
     app.include_router(case_drafts_router)
+    app.include_router(style_packs_read_router)
     # Debug UI：local/test 默认开；生产需显式 ENABLE_DEBUG_UI=true
     if settings.debug_ui_enabled():
+        app.include_router(style_packs_write_router)
         app.include_router(debug_router)
+    else:
+        # 同路径已有 GET 时，未注册写方法会变成 405；stub 保证写关闭仍为 404
+        app.include_router(style_packs_write_disabled_router)
 
     make_engine = engine_factory or (lambda url: create_engine(url, pool_pre_ping=True))
 

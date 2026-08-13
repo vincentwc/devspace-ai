@@ -28,6 +28,7 @@ async def generate_case_drafts(
     language: Annotated[str, Form()] = "zh-CN",
     max_cases: Annotated[int | None, Form()] = None,
     domain_hint: Annotated[str | None, Form()] = None,
+    style_pack_id: Annotated[str | None, Form()] = None,
 ) -> GenerationRunDTO:
     file_name: str | None = None
     file_bytes: bytes | None = None
@@ -42,6 +43,7 @@ async def generate_case_drafts(
         language=language,
         max_cases=max_cases,
         domain_hint=domain_hint,
+        style_pack_id=style_pack_id,
     )
     result = await _service(request).generate(command)
     return result_to_dto(result)

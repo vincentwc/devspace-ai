@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import asyncio
+import uuid
 from datetime import UTC, datetime
 from typing import Any, cast
 
@@ -19,21 +20,60 @@ from devspace_ai.application.dto.commands import GenerateCaseDraftsCommand
 from devspace_ai.application.dto.results import GenerateCaseDraftsResult
 from devspace_ai.application.port.outbound.model_port import ModelPort
 from devspace_ai.application.port.outbound.run_repository_port import RunRepositoryPort
+from devspace_ai.application.style_pack.errors import PackNotFoundError
+from devspace_ai.application.style_pack.service import StylePackService
 from devspace_ai.domain.case_draft.errors import CaseDraftValidationError
 from devspace_ai.domain.case_draft.models import CaseDraft, TestStep
 from devspace_ai.domain.run.models import GenerationRun, Issue, RunStatus, StepRecord
 from devspace_ai.domain.run.status import resolve_status
+from devspace_ai.domain.style_pack.errors import StylePackError
+from devspace_ai.domain.style_pack.models import StylePack
 from devspace_ai.infrastructure.config.settings import Settings
+from devspace_ai.infrastructure.prompt.case_generation import format_style_pack_block
 from devspace_ai.infrastructure.source.text_ingest import ingest_text, ingest_upload
 
 
 class CaseGenerationService:
     """用例草稿生成用例（use case）入口，依赖 Model / Run 两个出站端口。"""
 
-    def __init__(self, settings: Settings, model: ModelPort, runs: RunRepositoryPort) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        model: ModelPort,
+        runs: RunRepositoryPort,
+        style_packs: StylePackService,
+    ) -> None:
         self.settings = settings
         self.model = model
         self.runs = runs
+        self.style_packs = style_packs
+
+    def _resolve_style_pack(
+        self, style_pack_id: str | None, requirement_text: str
+    ) -> StylePack | None:
+        raw_id = (style_pack_id or "").strip()
+        if not raw_id:
+            return None
+        try:
+            uuid.UUID(raw_id)
+        except ValueError:
+            raise InputRejectedError("INVALID_INPUT", "风格包 id 格式无效") from None
+        try:
+            pack = self.style_packs.get(raw_id)
+        except PackNotFoundError:
+            raise InputRejectedError("PACK_NOT_FOUND", "风格包不存在") from None
+        try:
+            pack.validate()
+        except StylePackError as exc:
+            raise InputRejectedError("INVALID_EXAMPLE", exc.message, field=exc.field) from exc
+        block = format_style_pack_block(pack)
+        total = len(requirement_text) + len(block)
+        if total > self.settings.max_text_chars:
+            raise InputRejectedError(
+                "INPUT_TOO_LONG",
+                f"文本长度 {total} 超出上限 {self.settings.max_text_chars}（已计入风格包范文）",
+            )
+        return pack
 
     async def generate(self, command: GenerateCaseDraftsCommand) -> GenerateCaseDraftsResult:
         # text / file 二选一；两者都给或都不给都视为非法输入
@@ -65,7 +105,10 @@ class CaseGenerationService:
         else:
             doc = ingest_text(command.text or "", max_chars=self.settings.max_text_chars)
 
+        pack = self._resolve_style_pack(command.style_pack_id, doc.text)
+
         run = GenerationRun.start(doc.text)
+        run.style_pack = pack
         t0 = datetime.now(UTC)
         run.trace.steps.append(
             StepRecord(
@@ -76,12 +119,26 @@ class CaseGenerationService:
                 summary=f"chars={len(doc.text)}",
             )
         )
+        if pack is not None:
+            loaded_at = datetime.now(UTC)
+            run.trace.steps.append(
+                StepRecord(
+                    "load_style_context",
+                    "succeeded",
+                    loaded_at,
+                    datetime.now(UTC),
+                    summary=(
+                        f"{pack.name}（{pack.key}），"
+                        f"需求 {len(pack.examples)} 组，用例 {pack.draft_count()} 条"
+                    ),
+                )
+            )
 
         try:
             # 整段生成+校验受 total_timeout 约束（含一次 repair 重试）
             drafts, issues = await asyncio.wait_for(
                 self._generate_and_validate(
-                    doc.text, max_cases, command.language, command.domain_hint, run
+                    doc.text, max_cases, command.language, command.domain_hint, run, pack
                 ),
                 timeout=self.settings.total_timeout_seconds,
             )
@@ -122,7 +179,13 @@ class CaseGenerationService:
         # 无论成功失败都持久化，API 可按 run_id 回查
         self.runs.save(run)
         return GenerateCaseDraftsResult(
-            run.run_id, run.status, run.drafts, run.issues, run.trace, run.error
+            run.run_id,
+            run.status,
+            run.drafts,
+            run.issues,
+            run.trace,
+            run.error,
+            run.style_pack,
         )
 
     async def _generate_and_validate(
@@ -132,6 +195,7 @@ class CaseGenerationService:
         language: str,
         domain_hint: str | None,
         run: GenerationRun,
+        style_pack: StylePack | None,
     ) -> tuple[list[CaseDraft], list[Issue]]:
         """调用模型并做结构校验；若有校验问题则带 issues 再生成一次（最多一轮 repair）。"""
         started = datetime.now(UTC)
@@ -141,6 +205,7 @@ class CaseGenerationService:
             language=language,
             domain_hint=domain_hint,
             repair_issues=None,
+            style_pack=style_pack,
         )
         drafts, issues = self._validate_raw(raw.raw_drafts)
         run.trace.steps.append(
@@ -163,6 +228,7 @@ class CaseGenerationService:
                 language=language,
                 domain_hint=domain_hint,
                 repair_issues=[i.message for i in issues],
+                style_pack=style_pack,
             )
             drafts, issues = self._validate_raw(raw.raw_drafts)
             run.trace.steps.append(

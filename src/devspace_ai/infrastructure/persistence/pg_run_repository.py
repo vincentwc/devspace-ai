@@ -20,8 +20,57 @@ from devspace_ai.domain.run.models import (
     RunTrace,
     StepRecord,
 )
+from devspace_ai.domain.style_pack.models import StyleExample, StylePack
 from devspace_ai.infrastructure.persistence.db import create_db_engine, create_session_factory
 from devspace_ai.infrastructure.persistence.models import GenerationRunRow
+
+
+def _serialize_style_pack(pack: StylePack) -> dict[str, object]:
+    return {
+        "id": pack.id,
+        "key": pack.key,
+        "name": pack.name,
+        "description": pack.description,
+        "builtin": pack.builtin,
+        "examples": [
+            {
+                "label": ex.label,
+                "requirement_text": ex.requirement_text,
+                "drafts": [asdict(d) for d in ex.drafts],
+            }
+            for ex in pack.examples
+        ],
+    }
+
+
+def _deserialize_style_pack(raw: dict[str, Any] | None) -> StylePack | None:
+    if not raw:
+        return None
+    return StylePack(
+        id=raw["id"],
+        key=raw["key"],
+        name=raw["name"],
+        description=raw.get("description"),
+        builtin=bool(raw.get("builtin")),
+        examples=[
+            StyleExample(
+                label=item.get("label"),
+                requirement_text=item["requirement_text"],
+                drafts=[
+                    CaseDraft(
+                        title=d["title"],
+                        preconditions=d.get("preconditions") or [],
+                        steps=[TestStep(**s) for s in d.get("steps") or []],
+                        priority=d.get("priority"),
+                        tags=d.get("tags") or [],
+                        rationale=d.get("rationale"),
+                    )
+                    for d in item.get("drafts") or []
+                ],
+            )
+            for item in raw.get("examples") or []
+        ],
+    )
 
 
 def _serialize_payload(run: GenerationRun) -> dict[str, object]:
@@ -32,12 +81,15 @@ def _serialize_payload(run: GenerationRun) -> dict[str, object]:
         item["started_at"] = s.started_at.isoformat()
         item["ended_at"] = s.ended_at.isoformat() if s.ended_at else None
         steps.append(item)
-    return {
+    payload: dict[str, object] = {
         "drafts": [asdict(d) for d in run.drafts],
         "trace": {"steps": steps},
         "issues": [asdict(i) for i in run.issues],
         "error": run.error,
     }
+    if run.style_pack is not None:
+        payload["style_pack"] = _serialize_style_pack(run.style_pack)
+    return payload
 
 
 def _deserialize_run(row: GenerationRunRow) -> GenerationRun:
@@ -69,6 +121,7 @@ def _deserialize_run(row: GenerationRunRow) -> GenerationRun:
                 completion_tokens=s.get("completion_tokens"),
             )
         )
+    raw_pack = payload.get("style_pack")
     return GenerationRun(
         run_id=row.run_id,
         status=RunStatus(row.status),
@@ -77,6 +130,7 @@ def _deserialize_run(row: GenerationRunRow) -> GenerationRun:
         issues=issues,
         trace=RunTrace(steps=steps),
         error=payload.get("error"),
+        style_pack=_deserialize_style_pack(raw_pack if isinstance(raw_pack, dict) else None),
     )
 
 
