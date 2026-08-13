@@ -1,0 +1,246 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "devspace-ai 运行时架构",
+    "output": "devspace-ai-runtime.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/vincentwc/devspace-ai.git",
+      "revision": "c374e4d50e7cc2d872296fb94f0001c0234e7656"
+    },
+    "views": [
+      {
+        "id": "request-path",
+        "label": "主请求路径",
+        "focus": ["caller", "http-api", "case-gen", "model-adapter", "run-repo", "postgres"],
+        "note": "同步 POST 生成草稿：HTTP 适配 → Graph 编排 → 模型 → 无论成败都落 Run。"
+      },
+      {
+        "id": "model-branch",
+        "label": "模型出站",
+        "focus": ["model-adapter", "fake-model", "llm-gateway"],
+        "note": "无 MODEL_API_KEY 走进程内 Fake；有密钥才出站到 OpenAI 兼容网关。"
+      },
+      {
+        "id": "debug-trust",
+        "label": "调试门控",
+        "focus": ["debug-ui", "http-api", "case-gen"],
+        "note": "调试页与 REST 同进程调用同一服务；生产默认关闭 /debug/。"
+      }
+    ]
+  },
+  "layout": {
+    "mode": "grid",
+    "origin": [48, 72],
+    "cols": 5,
+    "gapX": 96,
+    "gapY": 120,
+    "cellW": 156,
+    "cellH": 70
+  },
+  "components": [
+    {
+      "id": "caller",
+      "type": "external",
+      "label": "调用方",
+      "sublabel": "curl / 业务系统",
+      "row": 1,
+      "col": 0
+    },
+    {
+      "id": "debug-ui",
+      "type": "frontend",
+      "label": "调试页",
+      "sublabel": "Jinja2 /debug/",
+      "tag": "ENABLE_DEBUG_UI",
+      "row": 0,
+      "col": 2,
+      "sources": [
+        { "path": "src/devspace_ai/interfaces/web_debug/routes.py", "line": 24, "label": "debug router" }
+      ]
+    },
+    {
+      "id": "http-api",
+      "type": "backend",
+      "label": "FastAPI HTTP",
+      "sublabel": "Uvicorn :8000",
+      "tag": "workers=1",
+      "row": 1,
+      "col": 1,
+      "sources": [
+        { "path": "src/devspace_ai/apps/api/main.py", "line": 29, "label": "create_app" },
+        { "path": "src/devspace_ai/interfaces/rest/routes_case_drafts.py", "line": 16, "label": "REST /api/v1" }
+      ]
+    },
+    {
+      "id": "case-gen",
+      "type": "backend",
+      "label": "用例生成服务",
+      "sublabel": "CaseGenerationService",
+      "tag": "同步 Graph",
+      "row": 1,
+      "col": 2,
+      "sources": [
+        { "path": "src/devspace_ai/application/case_generation/service.py", "line": 38, "label": "generate()" }
+      ]
+    },
+    {
+      "id": "model-adapter",
+      "type": "backend",
+      "label": "模型适配器",
+      "sublabel": "ModelPort 工厂",
+      "row": 1,
+      "col": 3,
+      "sources": [
+        { "path": "src/devspace_ai/infrastructure/model/factory.py", "line": 11, "label": "build_model_adapter" }
+      ]
+    },
+    {
+      "id": "fake-model",
+      "type": "backend",
+      "label": "Fake Model",
+      "sublabel": "确定性样例草稿",
+      "tag": "无密钥默认",
+      "row": 0,
+      "col": 3,
+      "sources": [
+        { "path": "src/devspace_ai/infrastructure/model/fake_model.py", "label": "FakeModelAdapter" }
+      ]
+    },
+    {
+      "id": "llm-gateway",
+      "type": "external",
+      "label": "LLM 网关",
+      "sublabel": "OpenAI 兼容 HTTP",
+      "tag": "MODEL_API_KEY",
+      "row": 1,
+      "col": 4,
+      "sources": [
+        { "path": "src/devspace_ai/infrastructure/model/openai_compatible.py", "line": 18, "label": "Chat Completions" }
+      ]
+    },
+    {
+      "id": "run-repo",
+      "type": "backend",
+      "label": "Run 仓储",
+      "sublabel": "PgRunRepository",
+      "row": 2,
+      "col": 3,
+      "sources": [
+        { "path": "src/devspace_ai/infrastructure/persistence/pg_run_repository.py", "line": 1, "label": "generation_runs" }
+      ]
+    },
+    {
+      "id": "postgres",
+      "type": "database",
+      "label": "PostgreSQL 16",
+      "sublabel": "generation_runs JSONB",
+      "tag": "host :55432",
+      "row": 2,
+      "col": 4,
+      "sources": [
+        { "path": "docker-compose.yml", "line": 2, "label": "postgres:16" }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "devspace-ai 应用进程",
+      "wraps": ["debug-ui", "http-api", "case-gen", "model-adapter", "fake-model", "run-repo"]
+    },
+    {
+      "kind": "security-group",
+      "label": "调试信任域 · ENABLE_DEBUG_UI",
+      "wraps": ["debug-ui"]
+    },
+    {
+      "kind": "region",
+      "label": "数据信任域",
+      "wraps": ["postgres"]
+    }
+  ],
+  "connections": [
+    {
+      "id": "caller-to-api",
+      "from": "caller",
+      "to": "http-api",
+      "label": "multipart POST",
+      "variant": "emphasis"
+    },
+    {
+      "id": "api-to-service",
+      "from": "http-api",
+      "to": "case-gen",
+      "label": "同步编排",
+      "variant": "emphasis"
+    },
+    {
+      "id": "debug-to-service",
+      "from": "debug-ui",
+      "to": "case-gen",
+      "label": "同进程调用",
+      "variant": "dashed",
+      "labelDy": 24
+    },
+    {
+      "id": "service-to-model",
+      "from": "case-gen",
+      "to": "model-adapter",
+      "label": "ModelPort",
+      "variant": "emphasis"
+    },
+    {
+      "id": "model-to-fake",
+      "from": "model-adapter",
+      "to": "fake-model",
+      "label": "无密钥默认"
+    },
+    {
+      "id": "model-to-llm",
+      "from": "model-adapter",
+      "to": "llm-gateway",
+      "label": "OpenAI 兼容 HTTP",
+      "variant": "dashed"
+    },
+    {
+      "id": "service-to-runs",
+      "from": "case-gen",
+      "to": "run-repo",
+      "label": "persist Run"
+    },
+    {
+      "id": "runs-to-pg",
+      "from": "run-repo",
+      "to": "postgres",
+      "label": "SQL / JSONB"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "主路径 Graph",
+      "items": [
+        "POST /api/v1/case-drafts/generate：ingest → generate → validate（可 repair 一次）→ persist",
+        "GET /runs/{run_id} 回查同一条 Run；草稿需人工确认后才进入业务用例库"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "模型与数据",
+      "items": [
+        "无 MODEL_API_KEY 或 MODEL_PROVIDER=fake 时不出站；有密钥才调用 Chat Completions",
+        "generation_runs 瘦表：run_id / status / input_text + payload JSONB"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "信任边界（v1）",
+      "items": [
+        "无鉴权、不写 TMS、无独立 SPA；Debug UI 仅 local/test 默认开启，生产关闭",
+        "GET /health 只探进程；GET /ready 对 PostgreSQL 执行 SELECT 1，失败返回 503"
+      ]
+    }
+  ]
+}
