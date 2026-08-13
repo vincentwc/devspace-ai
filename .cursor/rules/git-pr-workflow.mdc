@@ -1,5 +1,5 @@
 ---
-description: 禁止直推 main；开发分支 + 自测 + PR 合入的标准流程
+description: 禁止直推 main；开发分支 + 自测 + PR 合入；合入后清理；完成前验证
 alwaysApply: true
 ---
 
@@ -14,13 +14,19 @@ alwaysApply: true
    git checkout main && git pull origin main
    git checkout -b <type>/<short-name>
    ```
-2. 只在该分支上修改、提交；本地自测通过后再推远程：
+2. 只在该分支上修改、提交。**推送 / 开 PR / 声称完成前**必须有新鲜门禁证据：
    ```bash
-   # 至少：相关测试；有条件时 make lint && make typecheck && make test
-   git push -u origin HEAD
+   make lint && make typecheck && make test
    ```
-3. 以 `main` 为 base 创建 PR；合并后再切回 `main` 并 `git pull`。
-4. Agent 被要求「提交 / 开 PR」时：若当前在 `main`，**先建分支再提交**；**绝不** `git push origin main`。
+   （改动极小时至少跑相关 pytest；业务代码被 Debug 改过则必须再跑测试。）
+3. `git push -u origin HEAD`，以 `main` 为 base 开 PR（用仓库 PR 模板）。
+4. 合入后立刻：
+   ```bash
+   git checkout main && git pull origin main
+   git branch -d <type>/<short-name>          # 本地
+   git push origin --delete <type>/<short-name>  # 远程（若仍存在）
+   ```
+5. Agent 被要求「提交 / 开 PR」时：若当前在 `main`，**先建分支再提交**；**绝不** `git push origin main`。
 
 ## 分支命名
 
@@ -31,15 +37,20 @@ alwaysApply: true
 | `docs/` | 文档 / 注释 |
 | `chore/` | 工具链、流程、配置 |
 
-示例：`feat/case-draft-export`、`fix/model-timeout-mapping`、`chore/dev-pr-workflow`。
+## Autopilot / CI 阻挡合入时
+
+- 优先修与本 PR **相关** 的失败。
+- 若失败在 `main` 已存在、且为**最小安全修复**（如单文件 `ruff format`）并挡死本 PR：允许在本 PR 分支做该最小修复并注明「unblocking CI」，或先单独 `fix/` PR 修主干再 rebase。
+- **禁止**为过 CI 而改 `.github/workflows` 放宽检查。
 
 ## 禁止事项
 
 - 在 `main` 上 `git commit` 后直接推远程（含 force push）
 - 跳过自测就开 PR / 声称完成
+- 合入后长期保留已合并功能分支（易漏提交）
 - 用 amend / force push 改写已推送的共享分支（除非用户明确要求）
 
 ## 合并建议
 
-- 默认 Squash merge 进 `main`（保持主分支历史清晰）
-- PR 描述写清 Summary + Test plan
+- 默认 Squash merge 进 `main`
+- PR 描述写清 Summary + Test plan；涉及规格时勾选验收项

@@ -1,4 +1,4 @@
-.PHONY: sync lint typecheck test run docker-up db-migrate
+.PHONY: sync lint typecheck test hooks run docker-up db-migrate
 
 sync:
 	uv sync --all-extras --frozen
@@ -12,6 +12,10 @@ typecheck:
 
 test:
 	uv run pytest -v
+
+# 安装 git pre-commit 钩子（ruff check --fix + ruff format）
+hooks:
+	uv run pre-commit install
 
 run:
 	uv run uvicorn devspace_ai.apps.api.main:create_uvicorn_app --factory --host 0.0.0.0 --port 8000 --workers 1

@@ -49,3 +49,8 @@ python_version = "3.12"
 strict = true
 packages = ["devspace_ai"]
 mypy_path = "src"
+
+[dependency-groups]
+dev = [
+    "pre-commit==4.3.0",
+]
