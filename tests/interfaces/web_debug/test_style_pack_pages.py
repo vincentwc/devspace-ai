@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 
 import pytest
 from alembic.config import Config
@@ -171,3 +172,12 @@ def test_form_includes_structured_controls(client: TestClient) -> None:
     assert "addExample" in r.text or "添加需求" in r.text
     assert "rationale" in r.text.lower() or "<details" in r.text
     assert "/api/v1/style-packs" in r.text or "style_pack_form.js" in r.text
+
+
+def test_form_js_disables_save_until_fetch_settles() -> None:
+    js = (
+        Path(__file__).resolve().parents[3]
+        / "src/devspace_ai/interfaces/web_debug/static/style_pack_form.js"
+    ).read_text(encoding="utf-8")
+    assert "disabled = true" in js
+    assert "disabled = false" in js

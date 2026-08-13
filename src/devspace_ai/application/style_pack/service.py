@@ -23,9 +23,16 @@ class StylePackService:
         builtin = get_builtin(pack_id)
         if builtin is not None:
             return builtin
-        pack = self.repo.get(pack_id)
+        try:
+            pack = self.repo.get(pack_id)
+        except StylePackError as exc:
+            raise InputRejectedError("INVALID_EXAMPLE", exc.message, field=exc.field) from exc
         if pack is None:
             raise PackNotFoundError()
+        try:
+            pack.validate()
+        except StylePackError as exc:
+            raise InputRejectedError("INVALID_EXAMPLE", exc.message, field=exc.field) from exc
         return pack
 
     def create(self, pack: StylePack) -> StylePack:

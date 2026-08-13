@@ -1,4 +1,6 @@
+import json
 import os
+from uuid import uuid4
 
 import pytest
 from alembic.config import Config
@@ -134,3 +136,30 @@ def test_generate_invalid_style_pack_id_returns_400(client: TestClient) -> None:
     )
     assert response.status_code == 400
     assert response.json()["issues"][0]["code"] == "INVALID_INPUT"
+
+
+def test_generate_corrupt_style_pack_returns_invalid_example(
+    client: TestClient, db_url: str
+) -> None:
+    pack_id = str(uuid4())
+    engine = create_engine(db_url)
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO style_packs "
+                "(id, key, name, description, examples, created_at, updated_at) "
+                "VALUES (:id, :key, :name, NULL, CAST(:examples AS jsonb), now(), now())"
+            ),
+            {
+                "id": pack_id,
+                "key": "corrupt.pack",
+                "name": "损坏包",
+                "examples": json.dumps([{"drafts": []}]),
+            },
+        )
+    response = client.post(
+        "/api/v1/case-drafts/generate",
+        data={"text": "登录", "style_pack_id": pack_id},
+    )
+    assert response.status_code == 400
+    assert response.json()["issues"][0]["code"] == "INVALID_EXAMPLE"

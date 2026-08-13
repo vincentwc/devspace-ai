@@ -1,3 +1,5 @@
+from uuid import uuid4
+
 import httpx
 import pytest
 
@@ -6,8 +8,9 @@ from devspace_ai.application.case_generation.service import CaseGenerationServic
 from devspace_ai.application.dto.commands import GenerateCaseDraftsCommand
 from devspace_ai.application.port.outbound.model_port import ModelGenerationResult
 from devspace_ai.application.style_pack.service import StylePackService
+from devspace_ai.domain.case_draft.models import CaseDraft, TestStep
 from devspace_ai.domain.run.models import GenerationRun, RunStatus
-from devspace_ai.domain.style_pack.models import StylePack
+from devspace_ai.domain.style_pack.models import StyleExample, StylePack
 from devspace_ai.infrastructure.config.settings import Settings
 from devspace_ai.infrastructure.model.fake_model import FakeModelAdapter
 from devspace_ai.infrastructure.style_pack.builtins import BUILTIN_PAYMENT_ID
@@ -418,5 +421,53 @@ async def test_generate_style_pack_combined_length_too_long() -> None:
     assert ei.value.code == "INPUT_TOO_LONG"
     assert "已计入风格包范文" in ei.value.message
     assert "50" in ei.value.message
+
+
+class StoredInvalidStylePackRepository(EmptyStylePackRepository):
+    def __init__(self, pack: StylePack) -> None:
+        self._pack = pack
+
+    def get(self, id: str) -> StylePack | None:
+        if id == self._pack.id:
+            return self._pack
+        return None
+
+
+@pytest.mark.asyncio
+async def test_generate_invalid_stored_pack_rejects_without_model() -> None:
+    pack = StylePack(
+        id=str(uuid4()),
+        key="user.broken",
+        name="损坏包",
+        examples=[
+            StyleExample(
+                requirement_text="",
+                drafts=[
+                    CaseDraft(
+                        title="无标题步骤",
+                        steps=[TestStep(action="a", expected="b")],
+                    )
+                ],
+            )
+        ],
+    )
+    model = ScriptedModel([[_VALID_DRAFT]])
+    repo = InMemoryRunRepository()
+    svc = CaseGenerationService(
+        settings=Settings(_env_file=None),
+        model=model,
+        runs=repo,
+        style_packs=StylePackService(StoredInvalidStylePackRepository(pack)),
+    )
+    with pytest.raises(InputRejectedError) as ei:
+        await svc.generate(
+            GenerateCaseDraftsCommand(
+                text="用户登录",
+                file_name=None,
+                file_bytes=None,
+                style_pack_id=pack.id,
+            )
+        )
+    assert ei.value.code == "INVALID_EXAMPLE"
     assert model.calls == 0
     assert repo.store == {}

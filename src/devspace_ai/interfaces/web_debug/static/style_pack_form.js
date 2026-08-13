@@ -136,32 +136,41 @@ function showIssues(issues) {
 async function onSubmit(event) {
   event.preventDefault();
   const form = event.currentTarget;
+  const saveBtn = form.querySelector('button[type="submit"]');
+  if (saveBtn) saveBtn.disabled = true;
   const payload = collectPayload(form);
   const creating = form.dataset.mode === "create";
   const url = creating
     ? "/api/v1/style-packs"
     : `/api/v1/style-packs/${form.dataset.packId}`;
-  const res = await fetch(url, {
-    method: creating ? "POST" : "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-  let body = {};
   try {
-    body = await res.json();
+    const res = await fetch(url, {
+      method: creating ? "POST" : "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    let body = {};
+    try {
+      body = await res.json();
+    } catch (_err) {
+      body = {};
+    }
+    if (res.status === 400 && Array.isArray(body.issues)) {
+      showIssues(body.issues);
+      if (saveBtn) saveBtn.disabled = false;
+      return;
+    }
+    if (!res.ok) {
+      const detail = body.detail ? JSON.stringify(body.detail) : `HTTP ${res.status}`;
+      showIssues([{ code: "SAVE_FAILED", message: detail, field: null }]);
+      if (saveBtn) saveBtn.disabled = false;
+      return;
+    }
+    window.location.href = `/debug/style-packs/${body.id}`;
   } catch (_err) {
-    body = {};
+    showIssues([{ code: "SAVE_FAILED", message: "保存失败", field: null }]);
+    if (saveBtn) saveBtn.disabled = false;
   }
-  if (res.status === 400 && Array.isArray(body.issues)) {
-    showIssues(body.issues);
-    return;
-  }
-  if (!res.ok) {
-    const detail = body.detail ? JSON.stringify(body.detail) : `HTTP ${res.status}`;
-    showIssues([{ code: "SAVE_FAILED", message: detail, field: null }]);
-    return;
-  }
-  window.location.href = `/debug/style-packs/${body.id}`;
 }
 
 document.addEventListener("DOMContentLoaded", () => {

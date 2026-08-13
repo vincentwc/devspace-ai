@@ -1,4 +1,6 @@
+import json
 import os
+from uuid import uuid4
 
 import pytest
 from alembic.config import Config
@@ -136,3 +138,42 @@ def test_post_reserved_key_returns_invalid_key(client_write_on: TestClient) -> N
     response = client_write_on.post("/api/v1/style-packs", json=body)
     assert response.status_code == 400
     assert response.json()["issues"][0]["code"] == "INVALID_KEY"
+
+
+def _insert_corrupt_pack(db_url: str, pack_id: str) -> None:
+    engine = create_engine(db_url)
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO style_packs "
+                "(id, key, name, description, examples, created_at, updated_at) "
+                "VALUES (:id, :key, :name, NULL, CAST(:examples AS jsonb), now(), now())"
+            ),
+            {
+                "id": pack_id,
+                "key": "corrupt.pack",
+                "name": "损坏包",
+                "examples": json.dumps([{"drafts": []}]),
+            },
+        )
+
+
+def test_list_survives_corrupt_user_pack(client_write_on: TestClient, db_url: str) -> None:
+    pack_id = str(uuid4())
+    _insert_corrupt_pack(db_url, pack_id)
+    response = client_write_on.get("/api/v1/style-packs")
+    assert response.status_code == 200
+    items = response.json()
+    builtins = [p for p in items if p.get("builtin") is True]
+    assert len(builtins) >= 2
+    corrupt = next(p for p in items if p["id"] == pack_id)
+    assert corrupt["requirement_count"] == 0
+    assert corrupt["draft_count"] == 0
+
+
+def test_get_corrupt_pack_returns_invalid_example(client_write_on: TestClient, db_url: str) -> None:
+    pack_id = str(uuid4())
+    _insert_corrupt_pack(db_url, pack_id)
+    response = client_write_on.get(f"/api/v1/style-packs/{pack_id}")
+    assert response.status_code == 400
+    assert response.json()["issues"][0]["code"] == "INVALID_EXAMPLE"

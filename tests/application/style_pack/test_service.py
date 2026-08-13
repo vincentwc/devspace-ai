@@ -158,3 +158,23 @@ def test_create_then_list_all_length_three(service: StylePackService) -> None:
     assert packs[0].id == BUILTIN_PAYMENT_ID
     assert packs[1].id == BUILTIN_MARKETING_ID
     assert packs[2].id == created.id
+
+
+def test_get_maps_restore_error_to_invalid_example() -> None:
+    repo = MagicMock()
+    repo.get.side_effect = StylePackError("INVALID_EXAMPLE", "风格包范文无法还原", field="examples")
+    svc = StylePackService(repo)
+    with pytest.raises(InputRejectedError) as ei:
+        svc.get(str(uuid4()))
+    assert ei.value.code == "INVALID_EXAMPLE"
+    assert ei.value.field == "examples"
+
+
+def test_get_invalid_stored_pack_raises_invalid_example() -> None:
+    repo = InMemoryStylePackRepository()
+    pack = _pack(examples=[])
+    repo._by_id[pack.id] = pack
+    svc = StylePackService(repo)
+    with pytest.raises(InputRejectedError) as ei:
+        svc.get(pack.id)
+    assert ei.value.code == "INVALID_EXAMPLE"

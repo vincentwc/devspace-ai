@@ -1,3 +1,4 @@
+import json
 import os
 from uuid import uuid4
 
@@ -68,3 +69,50 @@ def test_create_get_delete_count(repo: PgStylePackRepository) -> None:
     assert repo.delete(created.id) is True
     assert repo.get(created.id) is None
     assert repo.count() == 0
+
+
+def _insert_corrupt_row(db_url: str, pack_id: str, key: str = "corrupt.pack") -> None:
+    engine = create_engine(db_url)
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO style_packs "
+                "(id, key, name, description, examples, created_at, updated_at) "
+                "VALUES (:id, :key, :name, NULL, CAST(:examples AS jsonb), now(), now())"
+            ),
+            {
+                "id": pack_id,
+                "key": key,
+                "name": "损坏包",
+                "examples": json.dumps([{"drafts": []}]),
+            },
+        )
+
+
+def test_list_user_skips_crash_on_corrupt_json(repo: PgStylePackRepository, db_url: str) -> None:
+    good = repo.create(_pack("good.pack"))
+    corrupt_id = str(uuid4())
+    _insert_corrupt_row(db_url, corrupt_id)
+    packs = repo.list_user()
+    by_id = {p.id: p for p in packs}
+    assert good.id in by_id
+    assert by_id[good.id].examples[0].requirement_text == "用户申请退款"
+    assert corrupt_id in by_id
+    assert by_id[corrupt_id].examples == []
+    assert by_id[corrupt_id].draft_count() == 0
+
+
+def test_get_corrupt_json_raises_invalid_example(repo: PgStylePackRepository, db_url: str) -> None:
+    pack_id = str(uuid4())
+    _insert_corrupt_row(db_url, pack_id)
+    with pytest.raises(StylePackError) as ei:
+        repo.get(pack_id)
+    assert ei.value.code == "INVALID_EXAMPLE"
+
+
+def test_create_integrity_error_maps_to_duplicate_key(repo: PgStylePackRepository) -> None:
+    repo.create(_pack("race.key"))
+    repo.get_by_key = lambda key: None  # type: ignore[method-assign]
+    with pytest.raises(StylePackError) as ei:
+        repo.create(_pack("race.key"))
+    assert ei.value.code == "DUPLICATE_KEY"

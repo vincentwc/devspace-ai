@@ -26,6 +26,7 @@ from devspace_ai.domain.case_draft.errors import CaseDraftValidationError
 from devspace_ai.domain.case_draft.models import CaseDraft, TestStep
 from devspace_ai.domain.run.models import GenerationRun, Issue, RunStatus, StepRecord
 from devspace_ai.domain.run.status import resolve_status
+from devspace_ai.domain.style_pack.errors import StylePackError
 from devspace_ai.domain.style_pack.models import StylePack
 from devspace_ai.infrastructure.config.settings import Settings
 from devspace_ai.infrastructure.prompt.case_generation import format_style_pack_block
@@ -61,6 +62,10 @@ class CaseGenerationService:
             pack = self.style_packs.get(raw_id)
         except PackNotFoundError:
             raise InputRejectedError("PACK_NOT_FOUND", "风格包不存在") from None
+        try:
+            pack.validate()
+        except StylePackError as exc:
+            raise InputRejectedError("INVALID_EXAMPLE", exc.message, field=exc.field) from exc
         block = format_style_pack_block(pack)
         total = len(requirement_text) + len(block)
         if total > self.settings.max_text_chars:
